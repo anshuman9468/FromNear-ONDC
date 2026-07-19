@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,8 +16,8 @@ from app.ondc.exceptions import (
 )
 import logging
 
-# Configure logging at application startup
-setup_logging()
+# Configure logging at application startup (use JSON in production)
+setup_logging(use_json=True)
 logger = logging.getLogger(__name__)
 
 def validate_ondc_config() -> None:
@@ -33,37 +35,50 @@ def validate_ondc_config() -> None:
         logger.critical(error_msg)
         raise ValueError(error_msg)
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Application lifespan: startup validation + clean shutdown of HTTP client."""
+    validate_ondc_config()
+    logger.info("ONDC Buyer BAP started successfully.")
+    yield
+    # Graceful shutdown: close shared httpx client
+    try:
+        from app.ondc.client.http_client import ondc_http_client
+        await ondc_http_client.close()
+        logger.info("ONDC HTTP client closed.")
+    except Exception as e:
+        logger.warning(f"Error closing ONDC HTTP client: {e}")
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Backend foundation and database management service for ONDC Buyer Certification using Pramaan",
     version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
 # CORS Configuration
-# Adjust origins in production as necessary
+# Note: "*" wildcard with allow_credentials=True violates the CORS spec (browsers reject it).
+# Restrict to known origins; add your frontend domain here if needed.
 origins = [
     "http://localhost",
     "http://localhost:8080",
     "http://localhost:3000",
-    "*",
+    "https://fromnear-ondc.onrender.com",
+    "https://ondc.fromnear.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"],
 )
 
 # Request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
-
-# Startup event handler
-@app.on_event("startup")
-def startup_event():
-    validate_ondc_config()
 
 # Exception Handlers
 @app.exception_handler(SigningConfigurationError)

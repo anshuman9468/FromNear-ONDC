@@ -1,0 +1,32 @@
+# Secrets and keys - NEVER bake into image
+.env
+.env.*
+.env.local
+.env.production
+keys/
+
+# Development artifacts
+.git
+.gitignore
+.venv
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Stray files
+=2.0.0
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docs
+README.md
+*.md
