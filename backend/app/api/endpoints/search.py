@@ -10,8 +10,16 @@ from app.ondc.schemas.product import ProductModel
 router = APIRouter()
 
 
+from typing import Optional
+
 class SearchRequest(BaseModel):
-    query: str
+    query: Optional[str] = ""
+    transaction_id: Optional[str] = None
+    bpp_id: Optional[str] = None
+    bpp_uri: Optional[str] = None
+    mode: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
 
 
 @router.post(
@@ -28,15 +36,16 @@ class SearchRequest(BaseModel):
 async def initiate_search(
     request_data: SearchRequest,
 ) -> Any:
-    """Initiate and broadcast an ONDC search request to the ONDC gateway."""
-    query = request_data.query.strip()
-    if not query:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Search query cannot be empty",
-        )
-    
-    result = await ondc_search_service.initiate_search(query)
+    """Initiate and broadcast an ONDC search request to the ONDC gateway or BPP."""
+    result = await ondc_search_service.initiate_search(
+        query=(request_data.query or "").strip(),
+        transaction_id=request_data.transaction_id,
+        bpp_id=request_data.bpp_id,
+        bpp_uri=request_data.bpp_uri,
+        mode=request_data.mode,
+        start_time=request_data.start_time,
+        end_time=request_data.end_time,
+    )
     return result
 
 

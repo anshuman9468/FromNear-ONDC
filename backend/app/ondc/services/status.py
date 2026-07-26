@@ -51,28 +51,32 @@ class StatusService:
 
     async def handle_on_status(self, db: AsyncSession, payload: Dict[str, Any]) -> None:
         """Process incoming on_status callback, updating order state in DB."""
-        parser = StatusResponse(payload)
-        if not parser.is_success:
-            logger.error(f"on_status callback reports error: {parser.error}")
-            return
-            
-        transaction_id = parser.transaction_id
-        if not transaction_id:
-            raise ValueError("Missing transaction_id in callback context")
-            
-        order = await order_repo.get_by_transaction_id_async(db, transaction_id)
-        if not order:
-            logger.warning(f"Order not found for transaction_id={transaction_id} on_status callback")
-            return
-            
-        new_state = parser.state
-        if new_state:
-            order.state = new_state
-            
-        order.raw_response = payload
-        db.add(order)
-        await db.commit()
-        logger.info(f"Handled on_status for transaction_id={transaction_id}, new state={order.state}")
+        try:
+            parser = StatusResponse(payload)
+            if not parser.is_success:
+                logger.error(f"on_status callback reports error: {parser.error}")
+                return
+                
+            transaction_id = parser.transaction_id
+            if not transaction_id:
+                logger.warning("Missing transaction_id in callback context")
+                return
+                
+            order = await order_repo.get_by_transaction_id_async(db, transaction_id)
+            if not order:
+                logger.warning(f"Order not found for transaction_id={transaction_id} on_status callback")
+                return
+                
+            new_state = parser.state
+            if new_state:
+                order.state = new_state
+                
+            order.raw_response = payload
+            db.add(order)
+            await db.commit()
+            logger.info(f"Handled on_status for transaction_id={transaction_id}, new state={order.state}")
+        except Exception as e:
+            logger.error(f"Error handling on_status: {str(e)}", exc_info=True)
 
 
 status_service = StatusService()

@@ -15,6 +15,8 @@ from app.ondc.services.status import status_service
 from app.ondc.services.track import track_service
 from app.ondc.services.cancel import cancel_service
 from app.ondc.services.support import support_service
+from app.ondc.services.update import update_service
+from app.ondc.services.issue import issue_service
 from app.ondc.validators.protocol import validate_timestamp, validate_ondc_signature
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,6 @@ async def process_ondc_callback(
             content={
                 "message": {"ack": {"status": "NACK"}},
                 "error": {
-                    "type": "JSON-PARSE-ERROR",
                     "code": "10000",
                     "message": "Request body must be valid JSON"
                 }
@@ -54,7 +55,6 @@ async def process_ondc_callback(
             content={
                 "message": {"ack": {"status": "NACK"}},
                 "error": {
-                    "type": "CONTEXT-ERROR",
                     "code": "10002",
                     "message": "Missing 'timestamp' in context"
                 }
@@ -69,7 +69,6 @@ async def process_ondc_callback(
             content={
                 "message": {"ack": {"status": "NACK"}},
                 "error": {
-                    "type": "CONTEXT-ERROR",
                     "code": "10003",
                     "message": f"Timestamp validation failed: {time_err}"
                 }
@@ -85,7 +84,6 @@ async def process_ondc_callback(
                 content={
                     "message": {"ack": {"status": "NACK"}},
                     "error": {
-                        "type": "JSON-SIGNATURE-ERROR",
                         "code": "10001",
                         "message": f"Signature verification failed: {sig_err}"
                     }
@@ -101,7 +99,6 @@ async def process_ondc_callback(
             content={
                 "message": {"ack": {"status": "NACK"}},
                 "error": {
-                    "type": "INTERNAL-ERROR",
                     "code": "50000",
                     "message": f"Failed to handle callback: {str(e)}"
                 }
@@ -181,3 +178,30 @@ async def on_support_callback(
 ):
     """Callback endpoint for BPPs to submit customer support details."""
     return await process_ondc_callback(request, db, "on_support", support_service.handle_on_support)
+
+
+@router.post("/on_update", status_code=status.HTTP_200_OK)
+async def on_update_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Callback endpoint for BPPs to submit order update details."""
+    return await process_ondc_callback(request, db, "on_update", update_service.handle_on_update)
+
+
+@router.post("/on_issue", status_code=status.HTTP_200_OK)
+async def on_issue_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Callback endpoint for BPPs to submit issue creation details."""
+    return await process_ondc_callback(request, db, "on_issue", issue_service.handle_on_issue)
+
+
+@router.post("/on_issue_status", status_code=status.HTTP_200_OK)
+async def on_issue_status_callback(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Callback endpoint for BPPs to submit issue status update details."""
+    return await process_ondc_callback(request, db, "on_issue_status", issue_service.handle_on_issue_status)

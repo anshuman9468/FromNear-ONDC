@@ -50,6 +50,9 @@ class SelectService:
                 amount=0.0,
                 currency="INR",
             )
+            
+            # Initialize raw_response as an empty dict, actual response will populate via on_select
+            order.raw_response = {}
             db.add(order)
             await db.commit()
             await db.refresh(order)
@@ -79,41 +82,46 @@ class SelectService:
 
     async def handle_on_select(self, db: AsyncSession, payload: Dict[str, Any]) -> None:
         """Process incoming on_select callback, updating quotes and items."""
-        parser = SelectResponse(payload)
-        if not parser.is_success:
-            logger.error(f"on_select callback reports error: {parser.error}")
-            return
+        try:
+            parser = SelectResponse(payload)
+            transaction_id = parser.transaction_id or payload.get("context", {}).get("transaction_id")
+            if not transaction_id:
+                logger.warning("Missing transaction_id in callback context")
+                return
+                
+            order = await order_repo.get_by_transaction_id_async(db, transaction_id)
+            if not order:
+                logger.warning(f"Order not found for transaction_id={transaction_id} on_select callback")
+                return
+                
+            # Always update raw_response so BPP context is preserved even if callback contains errors
+            order.raw_response = payload
+
+            if not parser.is_success:
+                logger.warning(f"on_select callback reports error: {parser.error}")
+                order.state = "SELECT_ERROR"
+                db.add(order)
+                await db.commit()
+                return
+                
+            # Update order amount and save raw_response
+            order.amount = parser.quote_price
+            order.state = "SELECTED"
             
-        transaction_id = parser.transaction_id
-        if not transaction_id:
-            raise ValueError("Missing transaction_id in callback context")
-            
-        order = await order_repo.get_by_transaction_id_async(db, transaction_id)
-        if not order:
-            logger.warning(f"Order not found for transaction_id={transaction_id} on_select callback")
-            return
-            
-        # Update order amount and save raw_response
-        order.amount = parser.quote_price
-        order.raw_response = payload
-        order.state = "SELECTED"
-        
-        # Clean existing items and overwrite with on_select callback details if needed
-        # (This is useful to fetch exact provider pricing adjustments/quotes)
-        # Update prices based on quote items
-        quote_items = parser.items
-        for qi in quote_items:
-            item_id = qi.get("id")
-            for local_item in order.items:
-                if local_item.item_id == item_id:
-                    # Update price from quote breakups if possible
-                    price_val = qi.get("price", {}).get("value")
-                    if price_val:
-                        local_item.price = float(price_val)
-                        
-        db.add(order)
-        await db.commit()
-        logger.info(f"Handled on_select for transaction_id={transaction_id}, new amount={order.amount}")
+            quote_items = parser.items
+            for qi in quote_items:
+                item_id = qi.get("id")
+                for local_item in order.items:
+                    if local_item.item_id == item_id:
+                        price_val = qi.get("price", {}).get("value")
+                        if price_val:
+                            local_item.price = float(price_val)
+                            
+            db.add(order)
+            await db.commit()
+            logger.info(f"Handled on_select for transaction_id={transaction_id}, new amount={order.amount}")
+        except Exception as e:
+            logger.error(f"Error handling on_select: {str(e)}", exc_info=True)
 
 
 select_service = SelectService()

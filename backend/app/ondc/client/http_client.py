@@ -241,10 +241,20 @@ async def safe_ondc_post(
     """Wraps ondc_http_client.post with comprehensive error handling to prevent unhandled exceptions and return structured errors."""
     try:
         response = await ondc_http_client.post(url, payload, sign=sign, retries=retries)
+        
+        try:
+            resp_json = response.json() if hasattr(response, 'json') else json.loads(response.text)
+            logger.info(f"ONDC Gateway Response for {url}: {json.dumps(resp_json)}")
+            ack_status = resp_json.get("message", {}).get("ack", {}).get("status", "ACK")
+        except Exception:
+            logger.info(f"ONDC Gateway Response for {url}: {response.text}")
+            ack_status = "ACK"
+
         return {
             "transaction_id": transaction_id,
             "message_id": message_id,
-            "status": "ACK"
+            "status": ack_status,
+            "raw_response": resp_json if 'resp_json' in locals() else response.text
         }
     except GatewayConnectionError as gce:
         if gce.response_body is not None:

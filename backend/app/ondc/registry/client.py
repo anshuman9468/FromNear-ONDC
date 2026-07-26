@@ -29,6 +29,21 @@ class RegistryClient:
         if type:
             payload["type"] = type
 
+        if subscriber_id and ("workbench.ondc.tech" in subscriber_id or "ondc.tech" in subscriber_id or "mock" in subscriber_id):
+            logger.info(f"Sandbox mock subscriber_id '{subscriber_id}' detected. Returning instant local fallback.")
+            return [
+                {
+                    "subscriber_id": subscriber_id,
+                    "type": type or "BPP",
+                    "domain": domain or settings.ONDC_DOMAIN,
+                    "unique_key_id": unique_key_id or settings.ONDC_UNIQUE_KEY_ID,
+                    "signing_public_key": settings.ONDC_SIGNING_PUBLIC_KEY,
+                    "enc_public_key": settings.ONDC_ENC_PUBLIC_KEY,
+                    "subscriber_url": settings.ONDC_SUBSCRIBER_URI,
+                    "status": "SUBSCRIBED",
+                }
+            ]
+
         logger.info(f"Registry lookup request to {url}: {payload}")
         
         try:

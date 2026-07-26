@@ -15,7 +15,8 @@ def calculate_blake2b_digest(body: bytes) -> str:
     """Calculate BLAKE2b (digest_size=64) hash of the request body, base64 encoded."""
     h = hashlib.blake2b(digest_size=64)
     h.update(body)
-    return base64.b64encode(h.digest()).decode("utf-8")
+    encoded = base64.b64encode(h.digest()).decode("utf-8")
+    return f"BLAKE-512={encoded}"
 
 
 def load_private_key(key_str: str) -> ed25519.Ed25519PrivateKey:
@@ -25,6 +26,10 @@ def load_private_key(key_str: str) -> ed25519.Ed25519PrivateKey:
         raw_bytes = base64.b64decode(key_str)
         if len(raw_bytes) == 32:
             return ed25519.Ed25519PrivateKey.from_private_bytes(raw_bytes)
+        elif len(raw_bytes) == 64:
+            # Libsodium often provides 64 bytes (private key + public key)
+            # cryptography library expects just the 32-byte seed
+            return ed25519.Ed25519PrivateKey.from_private_bytes(raw_bytes[:32])
     except Exception:
         pass
     
@@ -47,6 +52,8 @@ def load_private_key(key_str: str) -> ed25519.Ed25519PrivateKey:
         raw_bytes = bytes.fromhex(key_str)
         if len(raw_bytes) == 32:
             return ed25519.Ed25519PrivateKey.from_private_bytes(raw_bytes)
+        elif len(raw_bytes) == 64:
+            return ed25519.Ed25519PrivateKey.from_private_bytes(raw_bytes[:32])
     except Exception:
         pass
         
@@ -96,12 +103,19 @@ def generate_signing_string(created: int, expires: int, digest: str) -> bytes:
 
 def generate_auth_header(
     body: bytes,
-    subscriber_id: str = settings.ONDC_SUBSCRIBER_ID,
-    unique_key_id: str = settings.ONDC_UNIQUE_KEY_ID,
-    private_key_str: str = settings.ONDC_SIGNING_PRIVATE_KEY,
+    subscriber_id: Optional[str] = None,
+    unique_key_id: Optional[str] = None,
+    private_key_str: Optional[str] = None,
     ttl: int = 300,
 ) -> str:
     """Generate a valid ONDC Authorization header for a request body."""
+    if subscriber_id is None:
+        subscriber_id = settings.ONDC_SUBSCRIBER_ID
+    if unique_key_id is None:
+        unique_key_id = settings.ONDC_UNIQUE_KEY_ID
+    if private_key_str is None:
+        private_key_str = settings.ONDC_SIGNING_PRIVATE_KEY
+        
     created = int(time.time())
     expires = created + ttl
     digest = calculate_blake2b_digest(body)

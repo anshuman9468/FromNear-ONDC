@@ -1,7 +1,7 @@
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.settings import settings
 from app.ondc.client.http_client import ondc_http_client, safe_ondc_post
@@ -12,54 +12,46 @@ from app.ondc.schemas.product import ProductModel
 logger = logging.getLogger(__name__)
 
 
-class OndcSearchService:
-    @staticmethod
-    def generate_context(action: str, transaction_id: str, message_id: str) -> Dict[str, Any]:
-        """Generate a compliant ONDC request context."""
-        return {
-            "domain": settings.ONDC_DOMAIN,
-            "country": settings.ONDC_COUNTRY,
-            "city": settings.ONDC_CITY,
-            "action": action,
-            "core_version": "1.2.0",
-            "bap_id": settings.ONDC_SUBSCRIBER_ID,
-            "bap_uri": settings.ONDC_SUBSCRIBER_URI,
-            "transaction_id": transaction_id,
-            "message_id": message_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-            "ttl": "PT30S"
-        }
+from app.ondc.protocol.builders import SearchRequestBuilder
 
-    async def initiate_search(self, query: str) -> Dict[str, str]:
-        """Build and broadcast a standard ONDC search payload to the configured Gateway."""
-        transaction_id = str(uuid.uuid4())
+class OndcSearchService:
+    async def initiate_search(
+        self,
+        query: str = "",
+        *,
+        transaction_id: Optional[str] = None,
+        bpp_id: Optional[str] = None,
+        bpp_uri: Optional[str] = None,
+        mode: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build and send an ONDC search payload to Gateway or specific BPP."""
+        txn_id = transaction_id or str(uuid.uuid4())
         message_id = str(uuid.uuid4())
         
-        context = self.generate_context("search", transaction_id, message_id)
+        payload = SearchRequestBuilder.build(
+            query=query,
+            transaction_id=txn_id,
+            message_id=message_id,
+            bpp_id=bpp_id,
+            bpp_uri=bpp_uri,
+            mode=mode,
+            start_time=start_time,
+            end_time=end_time,
+        )
         
-        payload = {
-            "context": context,
-            "message": {
-                "intent": {
-                    "item": {
-                        "descriptor": {
-                            "name": query
-                        }
-                    },
-                    "fulfillment": {
-                        "type": "Delivery"
-                    }
-                }
-            }
-        }
-        
-        gateway_url = f"{settings.ONDC_GATEWAY_URL.rstrip('/')}/search"
-        logger.info(f"Broadcasting search query='{query}' to Gateway: {gateway_url}")
+        if bpp_uri:
+            target_url = f"{bpp_uri.rstrip('/')}/search"
+        else:
+            target_url = f"{settings.ONDC_GATEWAY_URL.rstrip('/')}/search"
+            
+        logger.info(f"Sending search request (mode={mode}) to {target_url}")
         
         return await safe_ondc_post(
-            url=gateway_url,
+            url=target_url,
             payload=payload,
-            transaction_id=transaction_id,
+            transaction_id=txn_id,
             message_id=message_id,
             sign=True
         )

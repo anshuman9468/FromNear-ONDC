@@ -12,6 +12,7 @@ from app.schemas.order import (
     ConfirmRequestSchema,
     CancelRequestSchema,
     SupportRequestSchema,
+    UpdateRequestSchema,
 )
 from app.ondc.services.select import select_service
 from app.ondc.services.init import init_service
@@ -20,6 +21,8 @@ from app.ondc.services.status import status_service
 from app.ondc.services.track import track_service
 from app.ondc.services.cancel import cancel_service
 from app.ondc.services.support import support_service
+from app.ondc.services.update import update_service
+from app.ondc.services.issue import issue_service
 from app.repositories.order import order_repo
 from app.ondc.exceptions import ONDCError
 
@@ -246,6 +249,54 @@ async def support_request(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Support failed: {str(e)}"
+        )
+
+
+@router.post("/update", status_code=status.HTTP_200_OK, responses=ONDC_SWAGGER_RESPONSES)
+async def update_order(
+    request_data: UpdateRequestSchema,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_optional_current_user),
+) -> Any:
+    """Initiate order update request to BPP."""
+    try:
+        result = await update_service.initiate_update(
+            db=db,
+            transaction_id=request_data.transaction_id,
+            update_target=request_data.update_target,
+            custom_order=request_data.order,
+        )
+        return result
+    except ONDCError as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Update request failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Update failed: {str(e)}"
+        )
+
+
+@router.post("/issue", status_code=status.HTTP_200_OK, responses=ONDC_SWAGGER_RESPONSES)
+async def raise_issue(
+    transaction_id: str = Query(...),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_optional_current_user),
+) -> Any:
+    """Initiate ONDC IGM 1.0.0 issue creation request for an order."""
+    try:
+        result = await issue_service.initiate_issue(
+            db=db,
+            transaction_id=transaction_id,
+        )
+        return result
+    except ONDCError as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Issue request failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Issue failed: {str(e)}"
         )
 
 

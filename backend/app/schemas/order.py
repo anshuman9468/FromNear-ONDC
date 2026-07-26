@@ -83,3 +83,9 @@ class CancelRequestSchema(BaseModel):
 
 class SupportRequestSchema(BaseModel):
     transaction_id: str
+
+
+class UpdateRequestSchema(BaseModel):
+    transaction_id: str
+    update_target: Optional[str] = "item"
+    order: Optional[dict] = None

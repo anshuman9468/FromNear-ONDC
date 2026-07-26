@@ -55,13 +55,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
 
     # ONDC Protocol Configuration
-    ONDC_SUBSCRIBER_ID: str = "bap.fromnear.com"
-    ONDC_SUBSCRIBER_URI: str = "https://bap.fromnear.com/api/v1/ondc"
+    ONDC_SUBSCRIBER_ID: str = "ondc.fromnear.com"
+    ONDC_SUBSCRIBER_URI: str = "https://ondc.fromnear.com/api/v1/ondc"
     ONDC_GATEWAY_URL: str = "https://staging.gateway.ondc.org"
     ONDC_REGISTRY_URL: str = "https://staging.registry.ondc.org"
-    ONDC_UNIQUE_KEY_ID: str = "bap-unique-key-id"
+    ONDC_UNIQUE_KEY_ID: str = "8c5c6504-113b-4150-acb0-6e2577c972ca"
     ONDC_TYPE: str = "BAP"  # BAP (Buyer Application Platform) or BPP (Provider)
-    ONDC_DOMAIN: str = "nic2004:52110"  # Retail domain
+    ONDC_DOMAIN: str = "ONDC:RET10"  # Retail domain
     ONDC_COUNTRY: str = "IND"
     ONDC_CITY: str = "std:080"  # e.g., Bengaluru
     ONDC_VERSION: str = "1.2.0"  # ONDC API version
@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     # ONDC Cryptographic Keys (Base64-encoded string, in hex or standard format)
     # Note: ONDC uses Ed25519 signing keys and X25519 encryption keys.
     # We provide default keys for local tests, which will be generated or loaded in code.
-    ONDC_SIGNING_PRIVATE_KEY: str = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
-    ONDC_SIGNING_PUBLIC_KEY: str = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
+    ONDC_SIGNING_PRIVATE_KEY: str = "midAN7ykDVbtOVIKJpwEGV0Tma5VOfQpeiBrYbRVhJ5AkJUMn9Z9yqlNTEbcSk4SHZnnCCbPpDW/Kqqn06zstA=="
+    ONDC_SIGNING_PUBLIC_KEY: str = "QJCVDJ/WfcqpTUxG3EpOEh2Z5wgmz6Q1vyqqp9Os7LQ="
     ONDC_ENC_PRIVATE_KEY: str = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
     ONDC_ENC_PUBLIC_KEY: str = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
 

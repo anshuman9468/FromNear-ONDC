@@ -51,26 +51,28 @@ class TrackService:
 
     async def handle_on_track(self, db: AsyncSession, payload: Dict[str, Any]) -> None:
         """Process incoming on_track callback, parsing tracking details."""
-        parser = TrackResponse(payload)
-        if not parser.is_success:
-            logger.error(f"on_track callback reports error: {parser.error}")
-            return
-            
-        transaction_id = parser.transaction_id
-        if not transaction_id:
-            raise ValueError("Missing transaction_id in callback context")
-            
-        order = await order_repo.get_by_transaction_id_async(db, transaction_id)
-        if not order:
-            logger.warning(f"Order not found for transaction_id={transaction_id} on_track callback")
-            return
-            
-        # Store tracking info inside order.raw_response or as status metadata
-        # (For Pramaan testing, keeping it in raw_response is sufficient)
-        order.raw_response = payload
-        db.add(order)
-        await db.commit()
-        logger.info(f"Handled on_track for transaction_id={transaction_id}, url={parser.tracking_url}")
+        try:
+            parser = TrackResponse(payload)
+            if not parser.is_success:
+                logger.error(f"on_track callback reports error: {parser.error}")
+                return
+                
+            transaction_id = parser.transaction_id
+            if not transaction_id:
+                logger.warning("Missing transaction_id in callback context")
+                return
+                
+            order = await order_repo.get_by_transaction_id_async(db, transaction_id)
+            if not order:
+                logger.warning(f"Order not found for transaction_id={transaction_id} on_track callback")
+                return
+                
+            order.raw_response = payload
+            db.add(order)
+            await db.commit()
+            logger.info(f"Handled on_track for transaction_id={transaction_id}, url={parser.tracking_url}")
+        except Exception as e:
+            logger.error(f"Error handling on_track: {str(e)}", exc_info=True)
 
 
 track_service = TrackService()

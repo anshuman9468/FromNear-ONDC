@@ -128,3 +128,13 @@ class SupportResponse(BaseResponseParser):
     @property
     def uri(self) -> str:
         return self.message.get("uri", "")
+
+
+class UpdateResponse(BaseResponseParser):
+    @property
+    def order_id(self) -> str:
+        return self.message.get("order", {}).get("id", "")
+
+    @property
+    def state(self) -> str:
+        return self.message.get("order", {}).get("state", "")

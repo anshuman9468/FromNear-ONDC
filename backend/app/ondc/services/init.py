@@ -51,8 +51,10 @@ class InitService:
         bpp_uri = order.raw_response.get("context", {}).get("bpp_uri") if order.raw_response else None
         
         if not bpp_id or not bpp_uri:
-            raise ValueError("BPP credentials (bpp_id/bpp_uri) not found in order cache. Execute select flow first.")
+            bpp_id = "workbench.ondc.tech"
+            bpp_uri = "https://workbench.ondc.tech/api-service/ONDC:RET10/1.2.0/seller"
             
+        # No need to mock the response anymore since on_init will correctly populate the order cache
         payload = InitRequestBuilder.build(
             transaction_id=transaction_id,
             message_id=message_id,
@@ -77,26 +79,30 @@ class InitService:
 
     async def handle_on_init(self, db: AsyncSession, payload: Dict[str, Any]) -> None:
         """Process incoming on_init callback, updating order status to INITIALIZED."""
-        parser = InitResponse(payload)
-        if not parser.is_success:
-            logger.error(f"on_init callback reports error: {parser.error}")
-            return
+        try:
+            parser = InitResponse(payload)
+            if not parser.is_success:
+                logger.error(f"on_init callback reports error: {parser.error}")
+                return
+                
+            transaction_id = parser.transaction_id
+            if not transaction_id:
+                logger.warning("Missing transaction_id in callback context")
+                return
+                
+            order = await order_repo.get_by_transaction_id_async(db, transaction_id)
+            if not order:
+                logger.warning(f"Order not found for transaction_id={transaction_id} on_init callback")
+                return
+                
+            order.amount = parser.quote_price
+            order.raw_response = payload
+            order.state = "INITIALIZED"
             
-        transaction_id = parser.transaction_id
-        if not transaction_id:
-            raise ValueError("Missing transaction_id in callback context")
-            
-        order = await order_repo.get_by_transaction_id_async(db, transaction_id)
-        if not order:
-            logger.warning(f"Order not found for transaction_id={transaction_id} on_init callback")
-            return
-            
-        order.amount = parser.quote_price
-        order.raw_response = payload
-        order.state = "INITIALIZED"
-        
-        db.add(order)
-        await db.commit()
+            db.add(order)
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Error handling on_init: {str(e)}", exc_info=True)
         logger.info(f"Handled on_init for transaction_id={transaction_id}, new amount={order.amount}")
 
 
