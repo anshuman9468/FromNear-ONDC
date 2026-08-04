@@ -187,7 +187,8 @@ def test_safe_ondc_post_success():
             assert result == {
                 "transaction_id": "tx_123",
                 "message_id": "msg_456",
-                "status": "ACK"
+                "status": "ACK",
+                "raw_response": "ACK"
             }
 
     asyncio.run(run())

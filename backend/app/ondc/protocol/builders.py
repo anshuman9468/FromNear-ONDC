@@ -245,6 +245,7 @@ class InitRequestBuilder(BaseRequestBuilder):
                                 "contact": {
                                     "phone": shipping_address.get("phone", ""),
                                     "email": shipping_address.get("email", "buyer@example.com"),
+                                    "name": shipping_address.get("name", ""),
                                 },
                                 "location": {
                                     "gps": format_gps("12.9716,77.5946"),

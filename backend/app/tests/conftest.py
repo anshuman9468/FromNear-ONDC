@@ -45,14 +45,10 @@ class AsyncSessionWrapper:
 def sanitize_test_settings() -> None:
     """Ensure tests run with valid cryptographic keys even if .env has placeholders."""
     from app.core.settings import settings
-    if not settings.ONDC_SIGNING_PRIVATE_KEY or "INSERT_" in settings.ONDC_SIGNING_PRIVATE_KEY:
-        settings.ONDC_SIGNING_PRIVATE_KEY = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
-    if not settings.ONDC_SIGNING_PUBLIC_KEY or "INSERT_" in settings.ONDC_SIGNING_PUBLIC_KEY:
-        settings.ONDC_SIGNING_PUBLIC_KEY = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
-    if not settings.ONDC_ENC_PRIVATE_KEY or "INSERT_" in settings.ONDC_ENC_PRIVATE_KEY:
-        settings.ONDC_ENC_PRIVATE_KEY = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
-    if not settings.ONDC_ENC_PUBLIC_KEY or "INSERT_" in settings.ONDC_ENC_PUBLIC_KEY:
-        settings.ONDC_ENC_PUBLIC_KEY = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
+    settings.ONDC_SIGNING_PRIVATE_KEY = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
+    settings.ONDC_SIGNING_PUBLIC_KEY = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
+    settings.ONDC_ENC_PRIVATE_KEY = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
+    settings.ONDC_ENC_PUBLIC_KEY = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
 
 
 @pytest.fixture(scope="session", autouse=True)

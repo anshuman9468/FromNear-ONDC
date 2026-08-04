@@ -1,6 +1,5 @@
 import json
 import logging
-import asyncio
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +7,6 @@ from typing import Any
 
 from app.api.deps import get_async_db
 from app.core.settings import settings
-from app.core.database import AsyncSessionLocal
 from app.ondc.services.search import ondc_search_service
 from app.ondc.services.select import select_service
 from app.ondc.services.init import init_service
@@ -109,16 +107,19 @@ async def process_ondc_callback(
                 }
             )
             
-    # 2. Fire-and-forget background processing of the callback logic
-    async def run_handler_async():
-        async with AsyncSessionLocal() as local_db:
-            try:
-                await handler_func(local_db, payload)
-                logger.info(f"Successfully processed background callback for action: {action}")
-            except Exception as e:
-                logger.error(f"Failed to process background {action} payload: {str(e)}", exc_info=True)
-
-    asyncio.create_task(run_handler_async())
+    # 2. Process the callback BEFORE returning ACK. Cloud Run only allocates
+    # CPU while a request is in flight — a detached asyncio.create_task() here
+    # can be frozen/killed the instant this handler returns, before the DB
+    # write lands. Awaiting inline guarantees the write completes.
+    try:
+        await handler_func(db, payload)
+        logger.info(f"Successfully processed callback for action: {action}")
+    except Exception as e:
+        logger.error(f"Failed to process {action} payload: {str(e)}", exc_info=True)
+        # Do not fail the ACK on a handler error — the raw body was already
+        # logged unconditionally above, so nothing is lost even if downstream
+        # processing itself has a bug. We still want the network layer to see
+        # a clean ACK for a well-formed, signature-valid request.
         
     return {
         "context": context,
