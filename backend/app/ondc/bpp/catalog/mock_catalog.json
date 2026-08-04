@@ -6,6 +6,17 @@
     "long_desc": "Fresh groceries delivered fast",
     "images": [
       "https://fromnear.com/store.jpg"
+    ],
+    "tags": [
+      {
+        "code": "bpp_terms",
+        "list": [
+          {
+            "code": "np_type",
+            "value": "MSN"
+          }
+        ]
+      }
     ]
   },
   "bpp/providers": [
@@ -20,11 +31,17 @@
           "https://fromnear.com/store.jpg"
         ]
       },
+      "ttl": "PT24H",
+      "time": {
+        "label": "enable",
+        "timestamp": "2026-07-28T15:09:50.000Z"
+      },
       "locations": [
         {
           "id": "L1",
           "gps": "12.9715987,77.5945627",
           "address": {
+            "locality": "M.G. Road",
             "street": "M.G. Road",
             "city": "Bengaluru",
             "area_code": "560001",
@@ -32,28 +49,68 @@
           },
           "circle": {
             "gps": "12.9715987,77.5945627",
-            "radius": {"unit": "km", "value": "10"}
+            "radius": {
+              "unit": "km",
+              "value": "10"
+            }
+          },
+          "time": {
+            "label": "enable",
+            "timestamp": "2026-07-28T15:09:50.000Z",
+            "days": "1,2,3,4,5,6,7",
+            "schedule": {
+              "holidays": []
+            },
+            "range": {
+              "start": "0900",
+              "end": "2100"
+            }
+          }
+        }
+      ],
+      "fulfillments": [
+        {
+          "id": "F1",
+          "type": "Delivery",
+          "contact": {
+            "phone": "9876543210",
+            "email": "support@fromnear.com"
           }
         }
       ],
       "categories": [
         {
-          "id": "Grocery",
+          "id": "CAT001",
           "descriptor": {
-            "name": "Grocery"
+            "name": "Atta, Flours and Sooji"
+          }
+        },
+        {
+          "id": "CAT002",
+          "descriptor": {
+            "name": "Rice and Rice Products"
           }
         }
       ],
       "items": [
         {
           "id": "I1",
-          "category_id": "Grocery",
+          "category_id": "Atta, Flours and Sooji",
+          "fulfillment_id": "F1",
+          "location_id": "L1",
+          "time": {
+            "label": "enable",
+            "timestamp": "2026-07-28T15:09:50.000Z"
+          },
           "descriptor": {
             "name": "Atta (Whole Wheat Flour) 5kg",
+            "code": "1:1001",
             "symbol": "https://fromnear.com/atta.png",
             "short_desc": "Premium quality wheat flour",
             "long_desc": "100% pure whole wheat flour, high in fiber.",
-            "images": ["https://fromnear.com/atta.png"]
+            "images": [
+              "https://fromnear.com/atta.png"
+            ]
           },
           "price": {
             "currency": "INR",
@@ -61,10 +118,19 @@
             "maximum_value": "300.00"
           },
           "quantity": {
-            "available": {"count": 100},
-            "maximum": {"count": 5}
+            "available": {
+              "count": "99"
+            },
+            "maximum": {
+              "count": "5"
+            },
+            "unitized": {
+              "measure": {
+                "unit": "kilogram",
+                "value": "5"
+              }
+            }
           },
-          "location_id": "L1",
           "@ondc/org/returnable": true,
           "@ondc/org/cancellable": true,
           "@ondc/org/return_window": "P7D",
@@ -75,13 +141,22 @@
         },
         {
           "id": "I2",
-          "category_id": "Grocery",
+          "category_id": "Rice and Rice Products",
+          "fulfillment_id": "F1",
+          "location_id": "L1",
+          "time": {
+            "label": "enable",
+            "timestamp": "2026-07-28T15:09:50.000Z"
+          },
           "descriptor": {
             "name": "Basmati Rice 5kg",
+            "code": "1:1002",
             "symbol": "https://fromnear.com/rice.png",
             "short_desc": "Premium long grain rice",
             "long_desc": "Aged basmati rice perfect for biryani.",
-            "images": ["https://fromnear.com/rice.png"]
+            "images": [
+              "https://fromnear.com/rice.png"
+            ]
           },
           "price": {
             "currency": "INR",
@@ -89,10 +164,19 @@
             "maximum_value": "500.00"
           },
           "quantity": {
-            "available": {"count": 50},
-            "maximum": {"count": 2}
+            "available": {
+              "count": "99"
+            },
+            "maximum": {
+              "count": "2"
+            },
+            "unitized": {
+              "measure": {
+                "unit": "kilogram",
+                "value": "5"
+              }
+            }
           },
-          "location_id": "L1",
           "@ondc/org/returnable": true,
           "@ondc/org/cancellable": true,
           "@ondc/org/return_window": "P7D",
@@ -100,6 +184,33 @@
           "@ondc/org/time_to_ship": "PT45M",
           "@ondc/org/available_on_cod": false,
           "@ondc/org/contact_details_consumer_care": "support@fromnear.com,18001234567"
+        }
+      ],
+      "tags": [
+        {
+          "code": "serviceability",
+          "list": [
+            {
+              "code": "location",
+              "value": "L1"
+            },
+            {
+              "code": "category",
+              "value": "CAT001"
+            },
+            {
+              "code": "type",
+              "value": "12"
+            },
+            {
+              "code": "val",
+              "value": "IND"
+            },
+            {
+              "code": "unit",
+              "value": "country"
+            }
+          ]
         }
       ]
     }

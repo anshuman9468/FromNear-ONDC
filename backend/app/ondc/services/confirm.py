@@ -61,7 +61,11 @@ class ConfirmService:
             raise ValueError("BPP credentials (bpp_id/bpp_uri) not found in order cache.")
             
         # Get the BPP-assigned order_id from on_init response
-        order_id = init_order.get("id", str(uuid.uuid4()))
+        order_id = init_order.get("id")
+        if not order_id:
+            order_id = str(uuid.uuid4()).replace("-", "")
+        elif len(order_id) > 32:
+            order_id = order_id.replace("-", "")[:32]
         quote = init_order.get("quote", {})
         payment = init_order.get("payment", {})
         tags = init_order.get("tags", [])

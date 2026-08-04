@@ -11,6 +11,7 @@ from app.ondc.bpp.services.init import bpp_init_service
 from app.ondc.bpp.services.confirm import bpp_confirm_service
 from app.ondc.bpp.services.status import bpp_status_service
 from app.ondc.bpp.services.update import bpp_update_service
+from app.ondc.bpp.services.cancel import bpp_cancel_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,22 +20,23 @@ router = APIRouter()
 async def process_incoming_bpp_request(request: Request, action: str, handler_func):
     """Generic helper to parse, validate, and dispatch incoming ONDC BPP requests."""
     body_bytes = await request.body()
+    context = {}
 
     try:
         payload = json.loads(body_bytes)
+        context = payload.get("context", {})
     except json.JSONDecodeError:
         logger.error(f"Request body for {action} is not valid JSON")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"message": {"ack": {"status": "NACK"}}, "error": {"code": "10000", "message": "Request body must be valid JSON"}}
+            content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "10000", "message": "Request body must be valid JSON"}}
         )
 
-    context = payload.get("context", {})
     timestamp_str = context.get("timestamp")
     if not timestamp_str:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"message": {"ack": {"status": "NACK"}}, "error": {"code": "10002", "message": "Missing 'timestamp' in context"}}
+            content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "10002", "message": "Missing 'timestamp' in context"}}
         )
 
     is_time_valid, time_err = validate_timestamp(timestamp_str)
@@ -42,7 +44,7 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
         logger.warning(f"Timestamp validation failed for {action}: {time_err}")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"message": {"ack": {"status": "NACK"}}, "error": {"code": "10003", "message": f"Timestamp validation failed: {time_err}"}}
+            content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "10003", "message": f"Timestamp validation failed: {time_err}"}}
         )
 
     if settings.ONDC_VERIFY_SIGNATURES:
@@ -51,8 +53,21 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
             logger.warning(f"Signature validation failed for {action}: {sig_err}")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"message": {"ack": {"status": "NACK"}}, "error": {"code": "10001", "message": f"Signature verification failed: {sig_err}"}}
+                content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "10001", "message": f"Signature verification failed: {sig_err}"}}
             )
+
+    order_id = payload.get("message", {}).get("order", {}).get("id", "UNKNOWN")
+    logger.info(
+        f"\n=== LIFECYCLE TRACE INBOUND ===\n"
+        f"Timestamp: {context.get('timestamp')}\n"
+        f"Action: {action}\n"
+        f"Transaction ID: {context.get('transaction_id')}\n"
+        f"Message ID: {context.get('message_id')}\n"
+        f"Order ID: {order_id}\n"
+        f"Request URL: {request.url}\n"
+        f"HTTP Method: {request.method}\n"
+        f"Caller: Workbench/BAP\n"
+    )
 
     try:
         await handler_func(payload)
@@ -60,10 +75,10 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
         logger.error(f"Failed to process {action} payload: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"message": {"ack": {"status": "NACK"}}, "error": {"code": "50000", "message": f"Failed to handle request: {str(e)}"}}
+            content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "50000", "message": f"Failed to handle request: {str(e)}"}}
         )
 
-    return {"message": {"ack": {"status": "ACK"}}}
+    return {"context": context, "message": {"ack": {"status": "ACK"}}}
 
 
 @router.post("/search", status_code=status.HTTP_200_OK)
@@ -100,3 +115,9 @@ async def status_endpoint(request: Request):
 async def update_endpoint(request: Request):
     """BPP: Receive /update (return request) from BAP and respond with on_update + lifecycle pushes."""
     return await process_incoming_bpp_request(request, "update", bpp_update_service.handle_update)
+
+
+@router.post("/cancel", status_code=status.HTTP_200_OK)
+async def cancel_endpoint(request: Request):
+    """BPP: Receive /cancel from BAP and respond with on_cancel."""
+    return await process_incoming_bpp_request(request, "cancel", bpp_cancel_service.handle_cancel)

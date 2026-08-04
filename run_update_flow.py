@@ -131,7 +131,31 @@ update_payload2 = {
         ],
         "items": [
             {"id": "I1", "quantity": {"count": 1}}
-        ]
+        ],
+        "payment": {
+            "type": "ON-ORDER",
+            "status": "PAID",
+            "collected_by": "BAP",
+            "params": {
+                "amount": "500.0",
+                "currency": "INR",
+                "transaction_id": transaction_id
+            },
+            "@ondc/org/buyer_app_finder_fee_type": "percent",
+            "@ondc/org/buyer_app_finder_fee_amount": "3",
+            "@ondc/org/settlement_details": [
+                {
+                    "settlement_counterparty": "seller-app",
+                    "settlement_phase": "sale-amount",
+                    "settlement_type": "neft",
+                    "beneficiary_name": "FromNear Store",
+                    "bank_name": "Mock Bank",
+                    "branch_name": "MG Road",
+                    "settlement_bank_account_no": "1234567890",
+                    "settlement_ifsc_code": "MOCK0001234"
+                }
+            ]
+        }
     }
 }
 res = requests.post(f"{BASE_URL}/update", json=update_payload2)

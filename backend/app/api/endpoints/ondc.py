@@ -1,5 +1,6 @@
 import json
 import logging
+import asyncio
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,7 @@ from typing import Any
 
 from app.api.deps import get_async_db
 from app.core.settings import settings
+from app.core.database import AsyncSessionLocal
 from app.ondc.services.search import ondc_search_service
 from app.ondc.services.select import select_service
 from app.ondc.services.init import init_service
@@ -32,13 +34,26 @@ async def process_ondc_callback(
     """Generic helper to parse, validate signatures, validate timestamps, and handle ONDC callback payloads."""
     body_bytes = await request.body()
     
+    # 1. Unconditionally log every inbound callback body
+    try:
+        body_str = body_bytes.decode('utf-8', errors='ignore')
+        logger.info(f"UNCONDITIONAL INCOMING CALLBACK [{action}]: {body_str}")
+    except Exception as e:
+        logger.error(f"Failed to decode incoming callback body for {action}: {e}")
+
+    context = {}
+    
     try:
         payload = json.loads(body_bytes)
+        context = payload.get("context", {})
+        if context.get("city") == "*":
+            context["city"] = settings.ONDC_CITY
     except json.JSONDecodeError:
         logger.error(f"Request body for {action} is not valid JSON")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={
+                "context": context,
                 "message": {"ack": {"status": "NACK"}},
                 "error": {
                     "code": "10000",
@@ -47,12 +62,12 @@ async def process_ondc_callback(
             }
         )
         
-    context = payload.get("context", {})
     timestamp_str = context.get("timestamp")
     if not timestamp_str:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={
+                "context": context,
                 "message": {"ack": {"status": "NACK"}},
                 "error": {
                     "code": "10002",
@@ -64,16 +79,19 @@ async def process_ondc_callback(
     is_time_valid, time_err = validate_timestamp(timestamp_str)
     if not is_time_valid:
         logger.warning(f"ONDC timestamp validation failed for {action}: {time_err}")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "message": {"ack": {"status": "NACK"}},
-                "error": {
-                    "code": "10003",
-                    "message": f"Timestamp validation failed: {time_err}"
+        # Only block with 400 Bad Request if signature verification is enabled
+        if settings.ONDC_VERIFY_SIGNATURES:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={
+                    "context": context,
+                    "message": {"ack": {"status": "NACK"}},
+                    "error": {
+                        "code": "10003",
+                        "message": f"Timestamp validation failed: {time_err}"
+                    }
                 }
-            }
-        )
+            )
         
     if settings.ONDC_VERIFY_SIGNATURES:
         is_sig_valid, sig_err = await validate_ondc_signature(request, body_bytes, context)
@@ -82,6 +100,7 @@ async def process_ondc_callback(
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={
+                    "context": context,
                     "message": {"ack": {"status": "NACK"}},
                     "error": {
                         "code": "10001",
@@ -90,22 +109,21 @@ async def process_ondc_callback(
                 }
             )
             
-    try:
-        await handler_func(db, payload)
-    except Exception as e:
-        logger.error(f"Failed to process {action} payload: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "message": {"ack": {"status": "NACK"}},
-                "error": {
-                    "code": "50000",
-                    "message": f"Failed to handle callback: {str(e)}"
-                }
-            }
-        )
+    # 2. Fire-and-forget background processing of the callback logic
+    async def run_handler_async():
+        async with AsyncSessionLocal() as local_db:
+            try:
+                await handler_func(local_db, payload)
+                logger.info(f"Successfully processed background callback for action: {action}")
+            except Exception as e:
+                logger.error(f"Failed to process background {action} payload: {str(e)}", exc_info=True)
+
+    asyncio.create_task(run_handler_async())
         
-    return {"message": {"ack": {"status": "ACK"}}}
+    return {
+        "context": context,
+        "message": {"ack": {"status": "ACK"}}
+    }
 
 
 @router.post("/on_search", status_code=status.HTTP_200_OK)

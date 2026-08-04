@@ -94,7 +94,10 @@ def test_on_search_callback_and_results(client: TestClient):
             json=callback_payload
         )
         assert callback_response.status_code == 200
-        assert callback_response.json() == {"message": {"ack": {"status": "ACK"}}}
+        assert callback_response.json() == {
+            "context": callback_payload["context"],
+            "message": {"ack": {"status": "ACK"}}
+        }
         
         # 2. Query the results endpoint using the same transaction ID
         results_response = client.get(
@@ -227,5 +230,8 @@ def test_on_search_callback_signature_success(client: TestClient):
                 headers=headers
             )
             assert response.status_code == 200
-            assert response.json() == {"message": {"ack": {"status": "ACK"}}}
+            assert response.json() == {
+                "context": callback_payload["context"],
+                "message": {"ack": {"status": "ACK"}}
+            }
 

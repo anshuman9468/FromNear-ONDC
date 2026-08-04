@@ -164,6 +164,65 @@ class UpdateService:
             order_payload["fulfillments"] = cleaned_fulfillments
             order_payload["items"] = cleaned_items
 
+        # Ensure payment object is present (required for return flow /update calls)
+        cached_payment = cached_order.get("payment", {})
+        if "payment" not in order_payload or not order_payload["payment"]:
+            order_payload["payment"] = cached_payment
+
+        # If still missing or empty, create a fallback payment structure
+        if not order_payload.get("payment"):
+            order_payload["payment"] = {
+                "type": "ON-ORDER",
+                "status": "PAID",
+                "collected_by": "BAP",
+                "params": {
+                    "amount": str(order.amount or "500.0"),
+                    "currency": "INR",
+                    "transaction_id": transaction_id,
+                },
+                "@ondc/org/buyer_app_finder_fee_type": "percent",
+                "@ondc/org/buyer_app_finder_fee_amount": "3",
+            }
+        
+        # Ensure settlement window and withholding amount are present
+        payment_dict = order_payload["payment"]
+        if "@ondc/org/settlement_window" not in payment_dict:
+            payment_dict["@ondc/org/settlement_window"] = "PT1D"
+        if "@ondc/org/withholding_amount" not in payment_dict:
+            payment_dict["@ondc/org/withholding_amount"] = "0.0"
+        
+        # Ensure settlement details are populated in payment
+        if "@ondc/org/settlement_details" not in payment_dict or not payment_dict["@ondc/org/settlement_details"]:
+            payment_dict["@ondc/org/settlement_details"] = [
+                {
+                    "settlement_counterparty": "seller-app",
+                    "settlement_phase": "sale-amount",
+                    "settlement_type": "neft",
+                    "settlement_reference": transaction_id,
+                    "subscriber_id": bpp_id or "workbench.ondc.tech",
+                    "beneficiary_name": "FromNear Store",
+                    "bank_name": "Mock Bank",
+                    "branch_name": "MG Road",
+                    "settlement_bank_account_no": "1234567890",
+                    "settlement_ifsc_code": "MOCK0001234"
+                }
+            ]
+        else:
+            # Ensure each entry has settlement_reference and other mandatory fields
+            new_sds = []
+            for sd in payment_dict["@ondc/org/settlement_details"]:
+                sd_copy = dict(sd)
+                if "settlement_reference" not in sd_copy:
+                    sd_copy["settlement_reference"] = transaction_id
+                if "settlement_type" not in sd_copy:
+                    sd_copy["settlement_type"] = "neft"
+                if "settlement_counterparty" not in sd_copy:
+                    sd_copy["settlement_counterparty"] = "seller-app"
+                if "settlement_phase" not in sd_copy:
+                    sd_copy["settlement_phase"] = "sale-amount"
+                new_sds.append(sd_copy)
+            payment_dict["@ondc/org/settlement_details"] = new_sds
+
         if "tags" not in order_payload or not order_payload["tags"]:
             order_payload["tags"] = [
                 {

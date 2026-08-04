@@ -61,7 +61,10 @@ def test_complete_order_lifecycle(client: TestClient):
         }
         callback_res = client.post("/api/v1/ondc/on_select", json=on_select_payload)
         assert callback_res.status_code == 200
-        assert callback_res.json() == {"message": {"ack": {"status": "ACK"}}}
+        assert callback_res.json() == {
+            "context": on_select_payload["context"],
+            "message": {"ack": {"status": "ACK"}}
+        }
         
         # Verify order in DB has state SELECTED and amount 300.0
         check_res = client.get(f"/api/v1/orders/{transaction_id}")
