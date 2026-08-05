@@ -152,7 +152,7 @@ class BppSearchService:
         await bpp_client.send_callback(context, "on_search", message)
 
     async def handle_search(self, payload: dict):
-        asyncio.create_task(self.process_search(payload))
+        await self.process_search(payload)
         logger.info(f"Accepted /search request for transaction {payload.get('context', {}).get('transaction_id')}")
 
 

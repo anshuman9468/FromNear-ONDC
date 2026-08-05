@@ -37,7 +37,7 @@ class BppInitService:
             logger.error(f"ERROR in process_init: {e}", exc_info=True)
 
     async def handle_init(self, payload: dict):
-        asyncio.create_task(self.process_init(payload))
+        await self.process_init(payload)
         logger.info(f"Accepted /init for tx {payload.get('context', {}).get('transaction_id')}")
 
 

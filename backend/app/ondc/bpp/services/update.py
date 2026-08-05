@@ -31,7 +31,6 @@ class BppUpdateService:
                 created_at=created_at,
                 updated_at=updated_at,
             )
-            order_obj["state"] = "In-progress"
 
             response_message = {"order": order_obj}
             response_payload = {
@@ -53,7 +52,7 @@ class BppUpdateService:
             raise
 
     async def handle_update(self, payload: dict):
-        asyncio.create_task(self.process_update(payload))
+        await self.process_update(payload)
         logger.info(f"Accepted /update for tx {payload.get('context', {}).get('transaction_id')}")
 
 

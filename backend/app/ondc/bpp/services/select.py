@@ -37,7 +37,7 @@ class BppSelectService:
             logger.error(f"ERROR in process_select: {e}", exc_info=True)
 
     async def handle_select(self, payload: dict):
-        asyncio.create_task(self.process_select(payload))
+        await self.process_select(payload)
         logger.info(f"Accepted /select for tx {payload.get('context', {}).get('transaction_id')}")
 
 

@@ -42,10 +42,12 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
     is_time_valid, time_err = validate_timestamp(timestamp_str)
     if not is_time_valid:
         logger.warning(f"Timestamp validation failed for {action}: {time_err}")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "10003", "message": f"Timestamp validation failed: {time_err}"}}
-        )
+        # Only hard-reject on timestamp mismatch when signature verification is active
+        if settings.ONDC_VERIFY_SIGNATURES:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"context": context, "message": {"ack": {"status": "NACK"}}, "error": {"code": "10003", "message": f"Timestamp validation failed: {time_err}"}}
+            )
 
     if settings.ONDC_VERIFY_SIGNATURES:
         is_sig_valid, sig_err = await validate_ondc_signature(request, body_bytes, context)

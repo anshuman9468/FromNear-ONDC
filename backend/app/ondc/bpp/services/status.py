@@ -52,7 +52,7 @@ class BppStatusService:
             logger.error(f"ERROR in process_status: {e}", exc_info=True)
 
     async def handle_status(self, payload: dict):
-        asyncio.create_task(self.process_status(payload))
+        await self.process_status(payload)
         logger.info(f"Accepted /status for tx {payload.get('context', {}).get('transaction_id')}")
 
 

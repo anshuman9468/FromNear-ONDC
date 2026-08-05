@@ -35,9 +35,9 @@ class LifecycleTracker:
             elif count == 3:
                 state = RET10_FULFILLMENT_STATE["PICKED_UP"]
             elif count == 4:
-                state = RET10_FULFILLMENT_STATE["RTO_INITIATED"]
+                state = RET10_FULFILLMENT_STATE["OUT_FOR_DELIVERY"]
             else:
-                state = RET10_FULFILLMENT_STATE["RTO_DELIVERED"]
+                state = RET10_FULFILLMENT_STATE["DELIVERED"]
 
         session["current_state"] = state
         logger.info(f"[LIFECYCLE TRACE] tx={transaction_id} status_call={count} -> state={state}")

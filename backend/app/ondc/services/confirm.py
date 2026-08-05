@@ -103,10 +103,7 @@ class ConfirmService:
             message_id=message_id,
             sign=True
         )
-        
-        # The real order_id and state will be set by the on_confirm webhook
-        
-        return response
+
 
     async def handle_on_confirm(self, db: AsyncSession, payload: Dict[str, Any]) -> None:
         """Process incoming on_confirm callback, completing order transaction."""

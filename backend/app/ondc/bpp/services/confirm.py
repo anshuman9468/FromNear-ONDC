@@ -51,7 +51,7 @@ class BppConfirmService:
             logger.error(f"ERROR in process_confirm: {e}", exc_info=True)
 
     async def handle_confirm(self, payload: dict):
-        asyncio.create_task(self.process_confirm(payload))
+        await self.process_confirm(payload)
         logger.info(f"Accepted /confirm for tx {payload.get('context', {}).get('transaction_id')}")
 
 

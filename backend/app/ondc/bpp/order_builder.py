@@ -54,19 +54,26 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
             total_value += item_total
             max_count = catalog_item.get("quantity", {}).get("maximum", {}).get("count", 5)
             avail_count = catalog_item.get("quantity", {}).get("available", {}).get("count", 100)
+            item_details = {
+                "id": item_id,
+                "price": {"currency": "INR", "value": f"{price:.2f}"},
+                "quantity": {
+                    "available": {"count": str(avail_count)},
+                    "maximum": {"count": str(max_count)}
+                }
+            }
+            if catalog_item.get("parent_item_id"):
+                item_details["parent_item_id"] = catalog_item["parent_item_id"]
+            if catalog_item.get("tags"):
+                item_details["tags"] = catalog_item["tags"]
+
             quote_breakup.append({
                 "@ondc/org/item_id": item_id,
                 "@ondc/org/item_quantity": {"count": int(quantity)},
                 "title": catalog_item["descriptor"]["name"],
                 "@ondc/org/title_type": "item",
                 "price": {"currency": "INR", "value": f"{item_total:.2f}"},
-                "item": {
-                    "price": {"currency": "INR", "value": f"{price:.2f}"},
-                    "quantity": {
-                        "available": {"count": str(avail_count)},
-                        "maximum": {"count": str(max_count)}
-                    }
-                }
+                "item": item_details
             })
 
     delivery_charge = 50.0
@@ -75,7 +82,10 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         "@ondc/org/item_id": "F1",
         "title": "Delivery charges",
         "@ondc/org/title_type": "delivery",
-        "price": {"currency": "INR", "value": f"{delivery_charge:.2f}"}
+        "price": {"currency": "INR", "value": f"{delivery_charge:.2f}"},
+        "item": {
+            "id": "F1"
+        }
     })
 
     return {
@@ -85,12 +95,28 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def format_gps(gps: str) -> str:
+    """Format GPS coordinates to at least 6 decimal places."""
+    if not gps:
+        return "12.971599,77.594563"
+    try:
+        parts = [p.strip() for p in gps.split(",")]
+        if len(parts) != 2:
+            return "12.971599,77.594563"
+        lat = float(parts[0])
+        lng = float(parts[1])
+        return f"{lat:.6f},{lng:.6f}"
+    except Exception:
+        return "12.971599,77.594563"
+
+
 def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_code: str) -> List[Dict[str, Any]]:
-    """Enrich fulfillment objects with all mandatory RET10 start/end/state fields."""
+    """Enrich fulfillment objects with all mandatory RET10 start/end/state/time fields."""
     if not raw_fulfillments:
         raw_fulfillments = [{}]
 
     enriched = []
+    now_str = _now()
     for f in raw_fulfillments:
         f_copy = dict(f) if f else {}
         f_copy["id"] = f_copy.get("id", "F1")
@@ -102,6 +128,7 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         f_copy["tracking"] = f_copy.get("tracking", False)
         f_copy["@ondc/org/category"] = f_copy.get("@ondc/org/category") or "Standard Delivery"
         f_copy["@ondc/org/TAT"] = f_copy.get("@ondc/org/TAT") or "PT45M"
+        f_copy["tags"] = f_copy.get("tags", [])
         f_copy["state"] = {"descriptor": {"code": state_code}}
 
         # Start location & contact (Store side details)
@@ -111,7 +138,7 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         desc = dict(loc.get("descriptor", {}))
         desc["name"] = desc.get("name") or "FromNear Main Branch"
         loc["descriptor"] = desc
-        loc["gps"] = loc.get("gps") or "12.9715987,77.5945627"
+        loc["gps"] = format_gps(loc.get("gps") or "12.971599,77.594563")
 
         addr = dict(loc.get("address", {}))
         addr["locality"] = addr.get("locality") or "M.G. Road"
@@ -126,20 +153,60 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         cnt["email"] = cnt.get("email") or "support@fromnear.com"
         start["contact"] = cnt
 
+        # Populate start time details
+        start_time = dict(start.get("time", {}))
+        if "range" not in start_time:
+            start_time["range"] = {
+                "start": now_str,
+                "end": now_str
+            }
+        if state_code in ("Order-picked-up", "Out-for-delivery", "Order-delivered", "RTO-Initiated", "RTO-Delivered", "Cancelled"):
+            start_time["timestamp"] = start_time.get("timestamp") or now_str
+        start["time"] = start_time
         f_copy["start"] = start
 
-        # End location & contact (Buyer side details)
-        if "end" not in f_copy or not f_copy.get("end"):
-            f_copy["end"] = {
-                "location": {
-                    "gps": "12.9715987,77.5945627",
-                    "address": {"area_code": "560001"}
-                },
-                "contact": {
-                    "phone": "9876543210",
-                    "email": "buyer@example.com"
-                }
+        # End location & contact & person (Buyer side details)
+        end = dict(f_copy.get("end", {}))
+        
+        # 1. Contact
+        end_cnt = dict(end.get("contact", {}))
+        end_cnt["phone"] = end_cnt.get("phone") or "9876543210"
+        end_cnt["email"] = end_cnt.get("email") or "buyer@example.com"
+        end_cnt["name"] = end_cnt.get("name") or "Jane Doe"
+        end["contact"] = end_cnt
+        
+        # 2. Person
+        end_pers = dict(end.get("person", {}))
+        end_pers["name"] = end_pers.get("name") or end_cnt["name"] or "Jane Doe"
+        end["person"] = end_pers
+        
+        # 3. Location & Address
+        end_loc = dict(end.get("location", {}))
+        end_loc["gps"] = format_gps(end_loc.get("gps") or "12.971599,77.594563")
+        
+        end_addr = dict(end_loc.get("address", {}))
+        end_addr["name"] = end_addr.get("name") or end_cnt["name"] or "Jane Doe"
+        end_addr["building"] = end_addr.get("building") or end_addr.get("door") or "Apt 4B"
+        end_addr["locality"] = end_addr.get("locality") or end_addr.get("street") or "MG Road"
+        end_addr["city"] = end_addr.get("city") or "Bengaluru"
+        end_addr["state"] = end_addr.get("state") or "Karnataka"
+        end_addr["country"] = end_addr.get("country") or "IND"
+        end_addr["area_code"] = end_addr.get("area_code") or "560001"
+        
+        end_loc["address"] = end_addr
+        end["location"] = end_loc
+
+        # 4. End time details
+        end_time = dict(end.get("time", {}))
+        if "range" not in end_time:
+            end_time["range"] = {
+                "start": now_str,
+                "end": now_str
             }
+        if state_code in ("Order-delivered", "RTO-Delivered"):
+            end_time["timestamp"] = end_time.get("timestamp") or now_str
+        end["time"] = end_time
+        f_copy["end"] = end
 
         enriched.append(f_copy)
 
@@ -171,6 +238,7 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
     """Construct full RET10 compliant payment structure with dual settlement_details and payment.params."""
     payment = dict(raw_payment) if raw_payment else {}
     bpp_id = settings.ONDC_SUBSCRIBER_ID
+    now_str = _now()
 
     incoming_settlements = payment.get("@ondc/org/settlement_details", [])
     settlement_details = [
@@ -178,6 +246,8 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
             "settlement_counterparty": "seller-app",
             "settlement_phase": "sale-amount",
             "settlement_type": "neft",
+            "settlement_timestamp": now_str,
+            "settlement_amount": total_amount,
             "subscriber_id": bpp_id,
             "beneficiary_name": "FromNear Store",
             "bank_name": "Mock Bank",
@@ -191,9 +261,17 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
         sd_copy = dict(sd)
         if sd_copy.get("settlement_counterparty") == "buyer-app":
             sd_copy["subscriber_id"] = bap_id
+            if "settlement_timestamp" not in sd_copy:
+                sd_copy["settlement_timestamp"] = now_str
+            if "settlement_amount" not in sd_copy:
+                sd_copy["settlement_amount"] = total_amount
             settlement_details.append(sd_copy)
         elif sd_copy.get("settlement_counterparty") == "seller-app":
             sd_copy["subscriber_id"] = bpp_id
+            if "settlement_timestamp" not in sd_copy:
+                sd_copy["settlement_timestamp"] = now_str
+            if "settlement_amount" not in sd_copy:
+                sd_copy["settlement_amount"] = total_amount
             settlement_details[0] = sd_copy
 
     payment["@ondc/org/settlement_details"] = settlement_details
@@ -232,7 +310,12 @@ def build_canonical_tags(include_bap_terms: bool = False) -> List[Dict[str, Any]
         tags.append({
             "code": "bap_terms",
             "list": [
-                {"code": "accept_bpp_terms", "value": "Y"}
+                {"code": "accept_bpp_terms", "value": "Y"},
+                {"code": "max_liability", "value": "2"},
+                {"code": "max_liability_cap", "value": "10000"},
+                {"code": "mandatory_arbitration", "value": "y"},
+                {"code": "court_jurisdiction", "value": "Bengaluru"},
+                {"code": "delay_interest", "value": "1000"}
             ]
         })
     return tags
@@ -271,22 +354,32 @@ def build_canonical_order(
         for it in raw_items:
             qty = it.get("quantity", {}).get("selected", {}).get("count") or \
                   it.get("quantity", {}).get("count", 1)
-            items.append({
+            item_obj = {
                 "id": it.get("id", "I1"),
-                "fulfillment_ids": ["F1"],
-                "location_ids": ["L1"],
+                "fulfillment_id": "F1",
+                "location_id": "L1",
                 "quantity": {"selected": {"count": int(qty)}}
-            })
+            }
+            if it.get("parent_item_id"):
+                item_obj["parent_item_id"] = it.get("parent_item_id")
+            if it.get("tags"):
+                item_obj["tags"] = it.get("tags")
+            items.append(item_obj)
     else:
         items = []
         for it in raw_items:
             qty = it.get("quantity", {}).get("selected", {}).get("count") or \
                   it.get("quantity", {}).get("count", 1)
-            items.append({
+            item_obj = {
                 "id": it.get("id", "I1"),
                 "fulfillment_id": "F1",
                 "quantity": {"count": int(qty)}
-            })
+            }
+            if it.get("parent_item_id"):
+                item_obj["parent_item_id"] = it.get("parent_item_id")
+            if it.get("tags"):
+                item_obj["tags"] = it.get("tags")
+            items.append(item_obj)
 
     fulfillments = build_canonical_fulfillments(incoming_order.get("fulfillments", []), state_code)
     quote = build_canonical_quote(raw_items)
@@ -307,7 +400,7 @@ def build_canonical_order(
 
     if action in ("on_confirm", "on_status", "on_update", "on_cancel"):
         order_obj["id"] = ord_id
-        order_obj["state"] = "Cancelled" if action == "on_cancel" else ("Completed" if state_code in ("Order-delivered", "Return-Delivered") else ("Accepted" if action == "on_confirm" else "In-progress"))
+        order_obj["state"] = "Cancelled" if action == "on_cancel" else ("Completed" if state_code in ("Order-delivered", "Return-Delivered") else ("Accepted" if action == "on_confirm" else "In-Progress"))
         order_obj["created_at"] = ord_created_at
         order_obj["updated_at"] = ord_updated_at
 

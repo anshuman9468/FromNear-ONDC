@@ -188,7 +188,7 @@ def test_safe_ondc_post_success():
                 "transaction_id": "tx_123",
                 "message_id": "msg_456",
                 "status": "ACK",
-                "raw_response": "ACK"
+                "raw_response": {"message": {"ack": {"status": "ACK"}}}
             }
 
     asyncio.run(run())

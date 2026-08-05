@@ -101,9 +101,10 @@ class InitService:
             
             db.add(order)
             await db.commit()
+            logger.info(f"Handled on_init for transaction_id={transaction_id}, new amount={order.amount}")
         except Exception as e:
             logger.error(f"Error handling on_init: {str(e)}", exc_info=True)
-        logger.info(f"Handled on_init for transaction_id={transaction_id}, new amount={order.amount}")
+
 
 
 init_service = InitService()

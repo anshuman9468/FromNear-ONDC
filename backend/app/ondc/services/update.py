@@ -228,7 +228,12 @@ class UpdateService:
                 {
                     "code": "bap_terms",
                     "list": [
-                        {"code": "accept_bpp_terms", "value": "Y"}
+                        {"code": "accept_bpp_terms", "value": "Y"},
+                        {"code": "max_liability", "value": "2"},
+                        {"code": "max_liability_cap", "value": "10000"},
+                        {"code": "mandatory_arbitration", "value": "y"},
+                        {"code": "court_jurisdiction", "value": "Bengaluru"},
+                        {"code": "delay_interest", "value": "1000"}
                     ]
                 }
             ]

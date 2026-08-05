@@ -1,4 +1,5 @@
 import time
+import json
 import logging
 import asyncio
 import httpx
@@ -24,6 +25,9 @@ class ONDCResponse:
     @property
     def is_success(self) -> bool:
         return 200 <= self.status_code < 300
+
+    def json(self) -> Optional[Dict[str, Any]]:
+        return self.json_data
 
 
 class ONDCHttpClient:
@@ -52,7 +56,6 @@ class ONDCHttpClient:
         if corr_id:
             headers["X-Correlation-ID"] = corr_id
             
-        import json
         body_bytes = json.dumps(payload).encode("utf-8")
         
         # Automatically sign the payload if requested

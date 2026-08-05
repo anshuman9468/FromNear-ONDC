@@ -137,7 +137,23 @@
           "@ondc/org/seller_pickup_return": true,
           "@ondc/org/time_to_ship": "PT45M",
           "@ondc/org/available_on_cod": false,
-          "@ondc/org/contact_details_consumer_care": "support@fromnear.com,18001234567"
+          "@ondc/org/contact_details_consumer_care": "support@fromnear.com,18001234567",
+          "@ondc/org/statutory_reqs_prepackaged_food": {
+            "nutritional_info": "Energy 349kcal, Protein 12g, Carbohydrates 72g, Fat 1.5g per 100g",
+            "additives_info": "No artificial additives or preservatives",
+            "ingredients_info": "Whole wheat flour",
+            "brand_owner_FSSAI_license_no": "10012345678901",
+            "other_FSSAI_license_no": "20012345678902",
+            "importer_FSSAI_license_no": "30012345678903"
+          },
+          "@ondc/org/statutory_reqs_packaged_commodities": {
+            "manufacturer_or_packer_name": "FromNear Foods Pvt Ltd",
+            "manufacturer_or_packer_address": "123 Industrial Area, Bengaluru, Karnataka",
+            "common_or_generic_name_of_commodity": "Whole Wheat Atta",
+            "month_year_of_manufacture_packing_import": "07-2026"
+          },
+          "tags": [],
+          "parent_item_id": ""
         },
         {
           "id": "I2",
@@ -183,7 +199,38 @@
           "@ondc/org/seller_pickup_return": true,
           "@ondc/org/time_to_ship": "PT45M",
           "@ondc/org/available_on_cod": false,
-          "@ondc/org/contact_details_consumer_care": "support@fromnear.com,18001234567"
+          "@ondc/org/contact_details_consumer_care": "support@fromnear.com,18001234567",
+          "@ondc/org/statutory_reqs_prepackaged_food": {
+            "nutritional_info": "Energy 348kcal, Protein 8g, Carbohydrates 77g, Fat 0.5g per 100g",
+            "additives_info": "No artificial additives or preservatives",
+            "ingredients_info": "Aged Basmati Rice",
+            "brand_owner_FSSAI_license_no": "10012345678904",
+            "other_FSSAI_license_no": "20012345678905",
+            "importer_FSSAI_license_no": "30012345678906"
+          },
+          "@ondc/org/statutory_reqs_packaged_commodities": {
+            "manufacturer_or_packer_name": "FromNear Foods Pvt Ltd",
+            "manufacturer_or_packer_address": "123 Industrial Area, Bengaluru, Karnataka",
+            "common_or_generic_name_of_commodity": "Basmati Rice",
+            "month_year_of_manufacture_packing_import": "06-2026"
+          },
+          "tags": [],
+          "parent_item_id": ""
+        }
+      ],
+      "creds": [
+        {
+          "id": "C1",
+          "type": "FSSAI",
+          "url": "https://fssai.gov.gov"
+        }
+      ],
+      "offers": [
+        {
+          "id": "O1",
+          "descriptor": {
+            "name": "5% Off on First Order"
+          }
         }
       ],
       "tags": [

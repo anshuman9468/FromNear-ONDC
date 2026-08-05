@@ -52,7 +52,7 @@ class BppCancelService:
             logger.error(f"ERROR in process_cancel: {e}", exc_info=True)
 
     async def handle_cancel(self, payload: dict):
-        asyncio.create_task(self.process_cancel(payload))
+        await self.process_cancel(payload)
         logger.info(f"Accepted /cancel for tx {payload.get('context', {}).get('transaction_id')}")
 
 

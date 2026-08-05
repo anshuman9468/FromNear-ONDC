@@ -171,9 +171,25 @@ class SelectRequestBuilder(BaseRequestBuilder):
                         {
                             "type": "Delivery",
                             "end": {
+                                "contact": {
+                                    "phone": "9876543210",
+                                    "email": "buyer@example.com",
+                                    "name": "Jane Doe"
+                                },
+                                "person": {
+                                    "name": "Jane Doe"
+                                },
                                 "location": {
                                     "gps": format_gps("12.9716,77.5946"),
-                                    "address": {"area_code": "560001"}
+                                    "address": {
+                                        "name": "Jane Doe",
+                                        "building": "Apt 4B",
+                                        "locality": "MG Road",
+                                        "city": "Bengaluru",
+                                        "state": "Karnataka",
+                                        "country": "IND",
+                                        "area_code": "560001"
+                                    }
                                 }
                             }
                         }
@@ -246,6 +262,9 @@ class InitRequestBuilder(BaseRequestBuilder):
                                     "phone": shipping_address.get("phone", ""),
                                     "email": shipping_address.get("email", "buyer@example.com"),
                                     "name": shipping_address.get("name", ""),
+                                },
+                                "person": {
+                                    "name": shipping_address.get("name", "") or "Jane Doe"
                                 },
                                 "location": {
                                     "gps": format_gps("12.9716,77.5946"),
@@ -335,12 +354,48 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
         fulfillments_with_tags = []
         for f in (fulfillments or []):
             f_copy = dict(f)
-            # Sanitize GPS precision in fulfillments
-            for loc_key in ["start", "end"]:
-                if loc_key in f_copy and isinstance(f_copy[loc_key], dict):
-                    loc_obj = f_copy[loc_key].get("location")
-                    if isinstance(loc_obj, dict) and "gps" in loc_obj:
-                        loc_obj["gps"] = format_gps(loc_obj["gps"])
+            # Ensure end is present and fully populated
+            end = dict(f_copy.get("end", {}))
+            
+            # Contact
+            end_cnt = dict(end.get("contact", {}))
+            end_cnt["phone"] = end_cnt.get("phone") or shipping_address.get("phone") or "9876543210"
+            end_cnt["email"] = end_cnt.get("email") or shipping_address.get("email") or "buyer@example.com"
+            end_cnt["name"] = end_cnt.get("name") or shipping_address.get("name") or "Jane Doe"
+            end["contact"] = end_cnt
+            
+            # Person
+            end_pers = dict(end.get("person", {}))
+            end_pers["name"] = end_pers.get("name") or end_cnt["name"] or "Jane Doe"
+            end["person"] = end_pers
+            
+            # Location
+            end_loc = dict(end.get("location", {}))
+            end_loc["gps"] = format_gps(end_loc.get("gps") or "12.9716,77.5946")
+            
+            # Address
+            end_addr = dict(end_loc.get("address", {}))
+            end_addr["name"] = end_addr.get("name") or end_cnt["name"] or "Jane Doe"
+            end_addr["building"] = end_addr.get("building") or end_addr.get("door") or shipping_address.get("house") or "Apt 4B"
+            end_addr["locality"] = end_addr.get("locality") or end_addr.get("street") or shipping_address.get("street") or "MG Road"
+            end_addr["city"] = end_addr.get("city") or shipping_address.get("city") or "Bengaluru"
+            end_addr["state"] = end_addr.get("state") or shipping_address.get("state") or "Karnataka"
+            end_addr["country"] = end_addr.get("country") or "IND"
+            end_addr["area_code"] = end_addr.get("area_code") or shipping_address.get("pincode") or "560001"
+            
+            end_loc["address"] = end_addr
+            end["location"] = end_loc
+            f_copy["end"] = end
+
+            # Sanitize GPS precision in start location
+            if "start" in f_copy and isinstance(f_copy["start"], dict):
+                start = dict(f_copy["start"])
+                start_loc = dict(start.get("location", {}))
+                if "gps" in start_loc:
+                    start_loc["gps"] = format_gps(start_loc["gps"])
+                start["location"] = start_loc
+                f_copy["start"] = start
+
             if "tags" in f_copy:
                 if not f_copy["tags"]:
                     f_copy.pop("tags")
@@ -449,7 +504,7 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
             "message": {
                 "order": {
                     "id": order_id,
-                    "state": "Created",
+                    "state": "Accepted",
                     "created_at": created_at or context["timestamp"],
                     "updated_at": updated_at or context["timestamp"],
                     "provider": provider or {
@@ -600,14 +655,52 @@ class UpdateRequestBuilder(BaseRequestBuilder):
             new_fulfillments = []
             for f in msg_order["fulfillments"]:
                 f_copy = dict(f)
+                
+                # Ensure end is present and fully populated
+                end = dict(f_copy.get("end", {}))
+                
+                # Contact
+                end_cnt = dict(end.get("contact", {}))
+                end_cnt["phone"] = end_cnt.get("phone") or "9876543210"
+                end_cnt["email"] = end_cnt.get("email") or "buyer@example.com"
+                end_cnt["name"] = end_cnt.get("name") or "Jane Doe"
+                end["contact"] = end_cnt
+                
+                # Person
+                end_pers = dict(end.get("person", {}))
+                end_pers["name"] = end_pers.get("name") or end_cnt["name"] or "Jane Doe"
+                end["person"] = end_pers
+                
+                # Location
+                end_loc = dict(end.get("location", {}))
+                end_loc["gps"] = format_gps(end_loc.get("gps") or "12.9716,77.5946")
+                
+                # Address
+                end_addr = dict(end_loc.get("address", {}))
+                end_addr["name"] = end_addr.get("name") or end_cnt["name"] or "Jane Doe"
+                end_addr["building"] = end_addr.get("building") or end_addr.get("door") or "Apt 4B"
+                end_addr["locality"] = end_addr.get("locality") or end_addr.get("street") or "MG Road"
+                end_addr["city"] = end_addr.get("city") or "Bengaluru"
+                end_addr["state"] = end_addr.get("state") or "Karnataka"
+                end_addr["country"] = end_addr.get("country") or "IND"
+                end_addr["area_code"] = end_addr.get("area_code") or "560001"
+                
+                end_loc["address"] = end_addr
+                end["location"] = end_loc
+                f_copy["end"] = end
+
+                # Sanitize GPS precision in start location
+                if "start" in f_copy and isinstance(f_copy["start"], dict):
+                    start = dict(f_copy["start"])
+                    start_loc = dict(start.get("location", {}))
+                    if "gps" in start_loc:
+                        start_loc["gps"] = format_gps(start_loc["gps"])
+                    start["location"] = start_loc
+                    f_copy["start"] = start
+
                 if "tags" in f_copy:
                     if not f_copy["tags"]:
                         f_copy.pop("tags")
-                for loc_key in ["start", "end"]:
-                    if loc_key in f_copy and isinstance(f_copy[loc_key], dict):
-                        loc_obj = f_copy[loc_key].get("location")
-                        if isinstance(loc_obj, dict) and "gps" in loc_obj:
-                            loc_obj["gps"] = format_gps(loc_obj["gps"])
                 new_fulfillments.append(f_copy)
             msg_order["fulfillments"] = new_fulfillments
 
