@@ -153,7 +153,7 @@
             "month_year_of_manufacture_packing_import": "07-2026"
           },
           "tags": [],
-          "parent_item_id": ""
+          "parent_item_id": "V1"
         },
         {
           "id": "I2",
@@ -215,7 +215,7 @@
             "month_year_of_manufacture_packing_import": "06-2026"
           },
           "tags": [],
-          "parent_item_id": ""
+          "parent_item_id": "V1"
         }
       ],
       "creds": [

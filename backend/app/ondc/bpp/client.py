@@ -21,11 +21,18 @@ class BppNetworkClient:
         ONDC requires the message_id to be the SAME as the incoming request's message_id.
         """
         context = request_context.copy()
+        context["domain"] = context.get("domain") or "ONDC:RET10"
+        context["country"] = context.get("country") or "IND"
+        context["core_version"] = context.get("core_version") or "1.2.0"
+        context["bap_id"] = context.get("bap_id") or "buyer-app-mock"
+        context["bap_uri"] = context.get("bap_uri") or "http://localhost:3000/mock/bap"
+        context["transaction_id"] = context.get("transaction_id") or str(uuid.uuid4())
+        context["message_id"] = context.get("message_id") or str(uuid.uuid4())
         context["action"] = action
         context["bpp_id"] = settings.ONDC_SUBSCRIBER_ID
         context["bpp_uri"] = settings.ONDC_SUBSCRIBER_URI
         context["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        if context.get("city") == "*":
+        if context.get("city") == "*" or not context.get("city"):
             context["city"] = settings.ONDC_CITY
         # Preserve message_id from the original request — do NOT generate a new one
         return context
@@ -36,12 +43,18 @@ class BppNetworkClient:
         These are not direct responses so they need a fresh message_id.
         """
         context = base_context.copy()
+        context["domain"] = context.get("domain") or "ONDC:RET10"
+        context["country"] = context.get("country") or "IND"
+        context["core_version"] = context.get("core_version") or "1.2.0"
+        context["bap_id"] = context.get("bap_id") or "buyer-app-mock"
+        context["bap_uri"] = context.get("bap_uri") or "http://localhost:3000/mock/bap"
+        context["transaction_id"] = context.get("transaction_id") or str(uuid.uuid4())
         context["action"] = action
         context["bpp_id"] = settings.ONDC_SUBSCRIBER_ID
         context["bpp_uri"] = settings.ONDC_SUBSCRIBER_URI
         context["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         context["message_id"] = str(uuid.uuid4())
-        if context.get("city") == "*":
+        if context.get("city") == "*" or not context.get("city"):
             context["city"] = settings.ONDC_CITY
         return context
 

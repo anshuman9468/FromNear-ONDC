@@ -28,17 +28,98 @@ ALLOWED_RETURN_STATUS_CODES = ALLOWED_FORWARD_STATUS_CODES | {
 # ISO-8601 UTC regex matching YYYY-MM-DDTHH:mm:ss.sssZ format
 ISO_UTC_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
+DEFAULT_PARENT_ITEM_ID = "V1"
+DEFAULT_ITEM_TAGS = [
+    {
+        "descriptor": {"code": "title"},
+        "list": [{"descriptor": {"code": "type"}, "value": "item"}],
+    }
+]
+DEFAULT_DELIVERY_TAGS = [
+    {
+        "descriptor": {"code": "title"},
+        "list": [{"descriptor": {"code": "type"}, "value": "delivery"}],
+    }
+]
+
 
 def _now() -> str:
     """Return ISO-8601 UTC timestamp in format YYYY-MM-DDTHH:mm:ss.sssZ."""
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _get_catalog_item_map() -> Dict[str, Dict[str, Any]]:
+    """Return catalog items keyed by id."""
+    from app.ondc.bpp.services.search import bpp_search_service
+
+    catalog_items = bpp_search_service.mock_catalog.get("bpp/providers", [])[0].get("items", [])
+    return {item["id"]: item for item in catalog_items}
+
+
+def _resolve_item_tags(catalog_item: Optional[Dict[str, Any]], incoming_tags: Any = None) -> List[Dict[str, Any]]:
+    """Return a non-empty tags array — Pramaan rejects missing or empty tags."""
+    if isinstance(incoming_tags, list) and len(incoming_tags) > 0:
+        return incoming_tags
+    catalog_tags = catalog_item.get("tags") if catalog_item else None
+    if isinstance(catalog_tags, list) and len(catalog_tags) > 0:
+        return catalog_tags
+    return DEFAULT_ITEM_TAGS
+
+
+def _resolve_parent_item_id(catalog_item: Optional[Dict[str, Any]], incoming: Any = None) -> str:
+    """Return a non-empty parent_item_id string."""
+    if isinstance(incoming, str) and incoming.strip():
+        return incoming.strip()
+    catalog_val = catalog_item.get("parent_item_id") if catalog_item else None
+    if isinstance(catalog_val, str) and catalog_val.strip():
+        return catalog_val.strip()
+    return DEFAULT_PARENT_ITEM_ID
+
+
+def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any]], unit_price: float) -> Dict[str, Any]:
+    """Build a fully populated quote.breakup[].item object."""
+    max_count = "5"
+    avail_count = "99"
+    if catalog_item:
+        max_count = str(catalog_item.get("quantity", {}).get("maximum", {}).get("count", 5))
+        avail_count = str(catalog_item.get("quantity", {}).get("available", {}).get("count", 99))
+    return {
+        "id": item_id,
+        "quantity": {
+            "available": {"count": avail_count},
+            "maximum": {"count": max_count},
+        },
+        "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
+        "parent_item_id": _resolve_parent_item_id(catalog_item),
+        "tags": _resolve_item_tags(catalog_item),
+    }
+
+
+def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a fully enriched order.items[] entry from catalog + incoming data."""
+    item_id = it.get("id", "I1")
+    catalog_item = catalog_map.get(item_id)
+    qty = (
+        it.get("quantity", {}).get("selected", {}).get("count")
+        or it.get("quantity", {}).get("count", 1)
+    )
+    item_obj: Dict[str, Any] = {
+        "id": item_id,
+        "fulfillment_id": it.get("fulfillment_id") or (catalog_item or {}).get("fulfillment_id") or "F1",
+        "parent_item_id": _resolve_parent_item_id(catalog_item, it.get("parent_item_id")),
+        "tags": _resolve_item_tags(catalog_item, it.get("tags")),
+    }
+    if action == "on_select":
+        item_obj["location_id"] = it.get("location_id") or (catalog_item or {}).get("location_id") or "L1"
+        item_obj["quantity"] = {"selected": {"count": int(qty)}}
+    else:
+        item_obj["quantity"] = {"count": int(qty)}
+    return item_obj
+
+
 def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Build the full ONDC-compliant quote from catalog data."""
-    from app.ondc.bpp.services.search import bpp_search_service
-    catalog_items = bpp_search_service.mock_catalog.get("bpp/providers", [])[0].get("items", [])
-    item_map = {item["id"]: item for item in catalog_items}
+    item_map = _get_catalog_item_map()
 
     quote_breakup = []
     total_value = 0.0
@@ -48,43 +129,31 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         quantity = item.get("quantity", {}).get("selected", {}).get("count") or \
                    item.get("quantity", {}).get("count", 1)
         catalog_item = item_map.get(item_id)
-        if catalog_item:
-            price = float(catalog_item["price"]["value"])
-            item_total = price * quantity
-            total_value += item_total
-            max_count = catalog_item.get("quantity", {}).get("maximum", {}).get("count", 5)
-            avail_count = catalog_item.get("quantity", {}).get("available", {}).get("count", 100)
-            item_details = {
-                "id": item_id,
-                "price": {"currency": "INR", "value": f"{price:.2f}"},
-                "quantity": {
-                    "available": {"count": str(avail_count)},
-                    "maximum": {"count": str(max_count)}
-                }
-            }
-            if catalog_item.get("parent_item_id"):
-                item_details["parent_item_id"] = catalog_item["parent_item_id"]
-            if catalog_item.get("tags"):
-                item_details["tags"] = catalog_item["tags"]
+        price = float((catalog_item or {}).get("price", {}).get("value", 250.0))
+        item_total = price * quantity
+        total_value += item_total
+        item_details = _build_quote_item_details(item_id, catalog_item, price)
 
-            quote_breakup.append({
-                "@ondc/org/item_id": item_id,
-                "@ondc/org/item_quantity": {"count": int(quantity)},
-                "title": catalog_item["descriptor"]["name"],
-                "@ondc/org/title_type": "item",
-                "price": {"currency": "INR", "value": f"{item_total:.2f}"},
-                "item": item_details
-            })
+        quote_breakup.append({
+            "@ondc/org/item_id": item_id,
+            "@ondc/org/item_quantity": {"count": int(quantity)},
+            "title": (catalog_item or {}).get("descriptor", {}).get("name", "Item"),
+            "@ondc/org/title_type": "item",
+            "price": {"currency": "INR", "value": f"{item_total:.2f}"},
+            "item": item_details,
+        })
 
     delivery_charge = 50.0
     total_value += delivery_charge
     quote_breakup.append({
         "@ondc/org/item_id": "F1",
+        "@ondc/org/item_quantity": {"count": 1},
         "title": "Delivery charges",
         "@ondc/org/title_type": "delivery",
         "price": {"currency": "INR", "value": f"{delivery_charge:.2f}"},
         "item": {
-            "id": "F1"
+            **_build_quote_item_details("F1", None, delivery_charge),
+            "tags": DEFAULT_DELIVERY_TAGS,
         }
     })
 
@@ -182,6 +251,7 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         
         # 3. Location & Address
         end_loc = dict(end.get("location", {}))
+        end_loc["id"] = end_loc.get("id") or "L2"
         end_loc["gps"] = format_gps(end_loc.get("gps") or "12.971599,77.594563")
         
         end_addr = dict(end_loc.get("address", {}))
@@ -206,6 +276,16 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         if state_code in ("Order-delivered", "RTO-Delivered"):
             end_time["timestamp"] = end_time.get("timestamp") or now_str
         end["time"] = end_time
+
+        # 5. Instructions
+        end_inst = dict(end.get("instructions", {}))
+        end_inst["name"] = end_inst.get("name") or "Status for drop"
+        end_inst["short_desc"] = end_inst.get("short_desc") or "Leave at door"
+        end_inst["long_desc"] = end_inst.get("long_desc") or "Leave at door"
+        end_inst["code"] = end_inst.get("code") or "1"
+        end_inst["images"] = end_inst.get("images") if isinstance(end_inst.get("images"), list) else []
+        end["instructions"] = end_inst
+
         f_copy["end"] = end
 
         enriched.append(f_copy)
@@ -253,7 +333,9 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
             "bank_name": "Mock Bank",
             "branch_name": "MG Road",
             "settlement_bank_account_no": "1234567890",
-            "settlement_ifsc_code": "MOCK0001234"
+            "settlement_ifsc_code": "MOCK0001234",
+            "upi_address": "fromnear@upi",
+            "settlement_status": "PAID"
         }
     ]
 
@@ -265,6 +347,8 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
                 sd_copy["settlement_timestamp"] = now_str
             if "settlement_amount" not in sd_copy:
                 sd_copy["settlement_amount"] = total_amount
+            sd_copy["upi_address"] = sd_copy.get("upi_address") or "bap@upi"
+            sd_copy["settlement_status"] = sd_copy.get("settlement_status") or "PAID"
             settlement_details.append(sd_copy)
         elif sd_copy.get("settlement_counterparty") == "seller-app":
             sd_copy["subscriber_id"] = bpp_id
@@ -272,9 +356,12 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
                 sd_copy["settlement_timestamp"] = now_str
             if "settlement_amount" not in sd_copy:
                 sd_copy["settlement_amount"] = total_amount
+            sd_copy["upi_address"] = sd_copy.get("upi_address") or "fromnear@upi"
+            sd_copy["settlement_status"] = sd_copy.get("settlement_status") or "PAID"
             settlement_details[0] = sd_copy
 
     payment["@ondc/org/settlement_details"] = settlement_details
+    payment["@ondc/org/settlement_basis"] = payment.get("@ondc/org/settlement_basis") or "delivery"
     if "@ondc/org/buyer_app_finder_fee_type" not in payment:
         payment["@ondc/org/buyer_app_finder_fee_type"] = "percent"
     if "@ondc/org/buyer_app_finder_fee_amount" not in payment:
@@ -290,6 +377,10 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
     params["currency"] = params.get("currency") or "INR"
     params["amount"] = params.get("amount") or total_amount
     payment["params"] = params
+    
+    # Optional transaction id if not provided
+    if "transaction_id" not in params:
+        params["transaction_id"] = "mock_tx_" + now_str[:10].replace("-", "")
 
     return payment
 
@@ -328,6 +419,8 @@ def build_canonical_order(
     order_id: Optional[str] = None,
     created_at: Optional[str] = None,
     updated_at: Optional[str] = None,
+    stored_order: Optional[Dict[str, Any]] = None,
+    order_state: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Produces a 100% RET10 1.2.0 compliant order object for any BPP callback action.
@@ -335,72 +428,63 @@ def build_canonical_order(
     """
     context = payload.get("context", {})
     message = payload.get("message", {})
-    incoming_order = message.get("order", {})
+    incoming_order = message.get("order") or stored_order or {}
 
     bap_id = context.get("bap_id", "workbench.ondc.tech")
     now_str = _now()
+    catalog_map = _get_catalog_item_map()
 
-    ord_id = order_id or incoming_order.get("id") or "2026-07-27-1001"
+    ord_id = order_id or incoming_order.get("id") or message.get("order_id") or "2026-07-27-1001"
     ord_created_at = created_at or incoming_order.get("created_at") or now_str
     ord_updated_at = updated_at or now_str
 
-    # Process items
     raw_items = incoming_order.get("items", [])
     if not raw_items:
         raw_items = [{"id": "I1", "quantity": {"count": 1}}]
 
-    if action == "on_select":
-        items = []
-        for it in raw_items:
-            qty = it.get("quantity", {}).get("selected", {}).get("count") or \
-                  it.get("quantity", {}).get("count", 1)
-            item_obj = {
-                "id": it.get("id", "I1"),
-                "fulfillment_id": "F1",
-                "location_id": "L1",
-                "quantity": {"selected": {"count": int(qty)}}
-            }
-            if it.get("parent_item_id"):
-                item_obj["parent_item_id"] = it.get("parent_item_id")
-            if it.get("tags"):
-                item_obj["tags"] = it.get("tags")
-            items.append(item_obj)
-    else:
-        items = []
-        for it in raw_items:
-            qty = it.get("quantity", {}).get("selected", {}).get("count") or \
-                  it.get("quantity", {}).get("count", 1)
-            item_obj = {
-                "id": it.get("id", "I1"),
-                "fulfillment_id": "F1",
-                "quantity": {"count": int(qty)}
-            }
-            if it.get("parent_item_id"):
-                item_obj["parent_item_id"] = it.get("parent_item_id")
-            if it.get("tags"):
-                item_obj["tags"] = it.get("tags")
-            items.append(item_obj)
+    items = [_build_order_item(it, action, catalog_map) for it in raw_items]
 
-    fulfillments = build_canonical_fulfillments(incoming_order.get("fulfillments", []), state_code)
+    raw_fulfillments = incoming_order.get("fulfillments", [])
+    if not raw_fulfillments and stored_order:
+        raw_fulfillments = stored_order.get("fulfillments", [])
+    fulfillments = build_canonical_fulfillments(raw_fulfillments, state_code)
     quote = build_canonical_quote(raw_items)
-    payment = build_canonical_payment(incoming_order.get("payment", {}), bap_id, quote["price"]["value"])
+    payment_source = incoming_order.get("payment") or (stored_order or {}).get("payment", {})
+    payment = build_canonical_payment(payment_source, bap_id, quote["price"]["value"])
     tags = build_canonical_tags(include_bap_terms=(action == "on_confirm"))
 
+    provider = incoming_order.get("provider") or (stored_order or {}).get("provider") or {
+        "id": "P1",
+        "locations": [{"id": "L1"}],
+    }
+
     order_obj = {
-        "provider": incoming_order.get("provider", {"id": "P1", "locations": [{"id": "L1"}]}),
+        "provider": provider,
         "items": items,
         "fulfillments": fulfillments,
         "quote": quote,
         "payment": payment,
-        "tags": tags
+        "tags": tags,
     }
 
     if action in ("on_init", "on_confirm", "on_status", "on_update", "on_cancel"):
-        order_obj["billing"] = build_canonical_billing(incoming_order.get("billing", {}), ord_created_at, ord_updated_at)
+        billing_source = incoming_order.get("billing") or (stored_order or {}).get("billing", {})
+        order_obj["billing"] = build_canonical_billing(billing_source, ord_created_at, ord_updated_at)
 
     if action in ("on_confirm", "on_status", "on_update", "on_cancel"):
         order_obj["id"] = ord_id
-        order_obj["state"] = "Cancelled" if action == "on_cancel" else ("Completed" if state_code in ("Order-delivered", "Return-Delivered") else ("Accepted" if action == "on_confirm" else "In-Progress"))
+        if order_state:
+            order_obj["state"] = order_state
+        elif action == "on_cancel":
+            order_obj["state"] = "Cancelled"
+        elif state_code in ("Order-delivered", "Return-Delivered"):
+            order_obj["state"] = "Completed"
+        elif action == "on_confirm":
+            order_obj["state"] = "Accepted"
+        elif state_code == "Packed" and action == "on_update":
+            order_obj["state"] = "In-progress"
+        else:
+            order_obj["state"] = "In-Progress"
         order_obj["created_at"] = ord_created_at
         order_obj["updated_at"] = ord_updated_at
 
@@ -525,5 +609,41 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
     bpp_terms = [t for t in tags if t.get("code") == "bpp_terms"]
     if not bpp_terms:
         errors.append("Tags missing mandatory bpp_terms entry: order.tags[*].code == 'bpp_terms'")
+
+    # 7. Items validation (Pramaan strict checks)
+    for idx, it in enumerate(order.get("items", [])):
+        if action == "on_select" and not it.get("quantity"):
+            errors.append(f"Item[{idx}] missing quantity for on_select")
+        if not isinstance(it.get("parent_item_id"), str) or not it.get("parent_item_id"):
+            errors.append(f"Item[{idx}] missing parent_item_id string")
+        if not isinstance(it.get("tags"), list):
+            errors.append(f"Item[{idx}] missing tags array")
+
+    # 8. Quote breakup validation
+    breakup = order.get("quote", {}).get("breakup", [])
+    for idx, entry in enumerate(breakup):
+        if not isinstance(entry.get("@ondc/org/item_quantity"), dict):
+            errors.append(f"Quote breakup[{idx}] missing @ondc/org/item_quantity object")
+        item = entry.get("item")
+        if not isinstance(item, dict):
+            errors.append(f"Quote breakup[{idx}] missing item object")
+            continue
+        if not isinstance(item.get("parent_item_id"), str) or not item.get("parent_item_id"):
+            errors.append(f"Quote breakup[{idx}].item missing parent_item_id string")
+        if not isinstance(item.get("tags"), list):
+            errors.append(f"Quote breakup[{idx}].item missing tags array")
+        if not item.get("price"):
+            errors.append(f"Quote breakup[{idx}].item missing price object")
+        if not item.get("quantity"):
+            errors.append(f"Quote breakup[{idx}].item missing quantity object")
+
+    # 9. Payment settlement validation
+    settlements = payment.get("@ondc/org/settlement_details", [])
+    for idx, sd in enumerate(settlements):
+        for field in ("settlement_amount", "settlement_timestamp", "upi_address", "settlement_status"):
+            if not sd.get(field):
+                errors.append(f"Settlement[{idx}] missing {field}")
+    if not payment.get("@ondc/org/settlement_basis"):
+        errors.append("Payment missing @ondc/org/settlement_basis")
 
     return errors

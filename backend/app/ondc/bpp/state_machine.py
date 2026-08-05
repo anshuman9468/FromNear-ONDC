@@ -16,9 +16,42 @@ class LifecycleTracker:
                 "current_state": "CREATED",
                 "status_call_count": 0,
                 "update_call_count": 0,
+                "select_call_count": 0,
                 "sent_callbacks": set(),
+                "stored_order": None,
+                "stored_context": None,
+                "created_at": None,
+                "order_id": None,
             }
         return self._store[transaction_id]
+
+    def store_order(self, transaction_id: str, order: Dict[str, Any], context: Dict[str, Any], created_at: str, order_id: str):
+        session = self.get_or_create(transaction_id)
+        session["stored_order"] = order
+        session["stored_context"] = context.copy()
+        session["created_at"] = created_at
+        session["order_id"] = order_id
+        logger.info(f"[LIFECYCLE TRACE] tx={transaction_id} stored order id={order_id}")
+
+    def get_stored_order(self, transaction_id: str) -> Optional[Dict[str, Any]]:
+        return self.get_or_create(transaction_id).get("stored_order")
+
+    def get_stored_context(self, transaction_id: str) -> Optional[Dict[str, Any]]:
+        return self.get_or_create(transaction_id).get("stored_context")
+
+    def get_created_at(self, transaction_id: str) -> Optional[str]:
+        return self.get_or_create(transaction_id).get("created_at")
+
+    def get_order_id(self, transaction_id: str) -> Optional[str]:
+        return self.get_or_create(transaction_id).get("order_id")
+
+    def increment_select(self, transaction_id: str) -> int:
+        session = self.get_or_create(transaction_id)
+        session["select_call_count"] += 1
+        return session["select_call_count"]
+
+    def get_select_count(self, transaction_id: str) -> int:
+        return self.get_or_create(transaction_id).get("select_call_count", 0)
 
     def advance_status_state(self, transaction_id: str, requested_state: Optional[str] = None) -> str:
         session = self.get_or_create(transaction_id)
