@@ -76,7 +76,7 @@ def _resolve_parent_item_id(catalog_item: Optional[Dict[str, Any]], incoming: An
     return DEFAULT_PARENT_ITEM_ID
 
 
-def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any]], unit_price: float) -> Dict[str, Any]:
+def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any]], unit_price: float, quantity: int = 1) -> Dict[str, Any]:
     """Build a fully populated quote.breakup[].item object."""
     max_count = "5"
     avail_count = "99"
@@ -88,6 +88,8 @@ def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any
         "quantity": {
             "available": {"count": avail_count},
             "maximum": {"count": max_count},
+            # selected count is mandatory in the quote breakup item per RET10 schema
+            "selected": {"count": quantity},
         },
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
@@ -106,6 +108,7 @@ def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Di
     item_obj: Dict[str, Any] = {
         "id": item_id,
         "fulfillment_id": it.get("fulfillment_id") or (catalog_item or {}).get("fulfillment_id") or "F1",
+        # parent_item_id is MANDATORY in all BPP responses per RET10 schema
         "parent_item_id": _resolve_parent_item_id(catalog_item, it.get("parent_item_id")),
         "tags": _resolve_item_tags(catalog_item, it.get("tags")),
     }
@@ -132,7 +135,7 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         price = float((catalog_item or {}).get("price", {}).get("value", 250.0))
         item_total = price * quantity
         total_value += item_total
-        item_details = _build_quote_item_details(item_id, catalog_item, price)
+        item_details = _build_quote_item_details(item_id, catalog_item, price, int(quantity))
 
         quote_breakup.append({
             "@ondc/org/item_id": item_id,
@@ -362,6 +365,9 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
 
     payment["@ondc/org/settlement_details"] = settlement_details
     payment["@ondc/org/settlement_basis"] = payment.get("@ondc/org/settlement_basis") or "delivery"
+    # settlement_window and withholding_amount are MANDATORY per RET10 schema
+    payment["@ondc/org/settlement_window"] = payment.get("@ondc/org/settlement_window") or "PT1D"
+    payment["@ondc/org/withholding_amount"] = payment.get("@ondc/org/withholding_amount") or "0.0"
     if "@ondc/org/buyer_app_finder_fee_type" not in payment:
         payment["@ondc/org/buyer_app_finder_fee_type"] = "percent"
     if "@ondc/org/buyer_app_finder_fee_amount" not in payment:
@@ -370,8 +376,8 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
         payment["type"] = "ON-ORDER"
     if "status" not in payment:
         payment["status"] = "PAID"
-    if "collected_by" not in payment:
-        payment["collected_by"] = "BAP"
+    # collected_by MUST be "BPP" — consistent with BAP INIT/CONFIRM
+    payment["collected_by"] = "BPP"
 
     params = dict(payment.get("params", {}))
     params["currency"] = params.get("currency") or "INR"
@@ -480,7 +486,8 @@ def build_canonical_order(
         elif state_code in ("Order-delivered", "Return-Delivered"):
             order_obj["state"] = "Completed"
         elif action == "on_confirm":
-            order_obj["state"] = "Accepted"
+            # ONDC RET10: on_confirm state must be "Created" (not "Accepted")
+            order_obj["state"] = "Created"
         elif state_code == "Packed" and action == "on_update":
             order_obj["state"] = "In-progress"
         else:

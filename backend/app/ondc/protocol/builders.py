@@ -150,12 +150,13 @@ class SelectRequestBuilder(BaseRequestBuilder):
             item_dict = {
                 "id": it["id"],
                 "quantity": {"count": get_item_count(it.get("quantity", 1))},
-                "location_id": "L1"
+                "location_id": "L1",
+                # parent_item_id and tags are MANDATORY per RET10 schema
+                "parent_item_id": it.get("parent_item_id") or "V1",
+                "tags": it.get("tags") if isinstance(it.get("tags"), list) and it.get("tags") else [
+                    {"code": "type", "list": [{"code": "type", "value": "item"}]}
+                ],
             }
-            if it.get("parent_item_id"):
-                item_dict["parent_item_id"] = it["parent_item_id"]
-            if it.get("tags"):
-                item_dict["tags"] = it["tags"]
             ondc_items.append(item_dict)
 
         return cls.validate_and_return({
@@ -169,7 +170,11 @@ class SelectRequestBuilder(BaseRequestBuilder):
                     "items": ondc_items,
                     "fulfillments": [
                         {
+                            # id is MANDATORY in select per RET10 schema
+                            "id": "F1",
                             "type": "Delivery",
+                            # tracking must be consistent with on_select response
+                            "tracking": True,
                             "end": {
                                 "contact": {
                                     "phone": "9876543210",
@@ -219,12 +224,13 @@ class InitRequestBuilder(BaseRequestBuilder):
             item_dict = {
                 "id": it["id"],
                 "quantity": {"count": get_item_count(it.get("quantity", 1))},
-                "fulfillment_id": it.get("fulfillment_id", "F1")
+                "fulfillment_id": it.get("fulfillment_id", "F1"),
+                # parent_item_id and tags are MANDATORY per RET10 schema
+                "parent_item_id": it.get("parent_item_id") or "V1",
+                "tags": it.get("tags") if isinstance(it.get("tags"), list) and it.get("tags") else [
+                    {"code": "type", "list": [{"code": "type", "value": "item"}]}
+                ],
             }
-            if it.get("parent_item_id"):
-                item_dict["parent_item_id"] = it["parent_item_id"]
-            if it.get("tags"):
-                item_dict["tags"] = it["tags"]
             ondc_items.append(item_dict)
 
         return cls.validate_and_return({
@@ -256,12 +262,15 @@ class InitRequestBuilder(BaseRequestBuilder):
                         {
                             "id": "F1",
                             "type": "Delivery",
-                            "tracking": False,
+                            # tracking MUST be True — mirrors on_select.fulfillment.tracking value
+                            "tracking": True,
+                            "@ondc/org/TAT": "PT45M",
+                            "@ondc/org/provider_name": "FromNear Store",
                             "end": {
                                 "contact": {
-                                    "phone": shipping_address.get("phone", ""),
-                                    "email": shipping_address.get("email", "buyer@example.com"),
-                                    "name": shipping_address.get("name", ""),
+                                    "phone": shipping_address.get("phone", "") or "9876543210",
+                                    "email": shipping_address.get("email", "") or "buyer@example.com",
+                                    "name": shipping_address.get("name", "") or "Jane Doe",
                                 },
                                 "person": {
                                     "name": shipping_address.get("name", "") or "Jane Doe"
@@ -269,13 +278,13 @@ class InitRequestBuilder(BaseRequestBuilder):
                                 "location": {
                                     "gps": format_gps("12.9716,77.5946"),
                                     "address": {
-                                        "name": shipping_address.get("name", ""),
-                                        "building": shipping_address.get("house", ""),
-                                        "locality": shipping_address.get("street", ""),
-                                        "city": shipping_address.get("city", ""),
-                                        "state": shipping_address.get("state", ""),
+                                        "name": shipping_address.get("name", "") or "Jane Doe",
+                                        "building": shipping_address.get("house", "") or "Apt 4B",
+                                        "locality": shipping_address.get("street", "") or "MG Road",
+                                        "city": shipping_address.get("city", "") or "Bengaluru",
+                                        "state": shipping_address.get("state", "") or "Karnataka",
                                         "country": "IND",
-                                        "area_code": shipping_address.get("pincode", ""),
+                                        "area_code": shipping_address.get("pincode", "") or "560001",
                                     }
                                 }
                             }
@@ -283,10 +292,12 @@ class InitRequestBuilder(BaseRequestBuilder):
                     ],
                     "payment": {
                         "type": "ON-ORDER",
-                        "collected_by": "BAP",
+                        # collected_by MUST be "BPP" — must be consistent across INIT and CONFIRM
+                        "collected_by": "BPP",
                         "status": "PAID",
                         "@ondc/org/buyer_app_finder_fee_type": "percent",
                         "@ondc/org/buyer_app_finder_fee_amount": "3",
+                        "@ondc/org/settlement_basis": "delivery",
                         "@ondc/org/settlement_window": "PT1D",
                         "@ondc/org/withholding_amount": "0.0",
                         "@ondc/org/settlement_details": [
@@ -333,46 +344,55 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
     ) -> Dict[str, Any]:
         context = cls.generate_context("confirm", transaction_id, message_id, bpp_id, bpp_uri)
         
-        # Sanitize items
+        # Sanitize items - parent_item_id and tags are MANDATORY per RET10
         items_with_tags = []
         for it in (items or []):
             it_copy = dict(it)
             if "location_id" not in it_copy or not it_copy["location_id"]:
                 it_copy["location_id"] = "L1"
-            if "parent_item_id" in it_copy:
-                if not it_copy["parent_item_id"]:
-                    it_copy.pop("parent_item_id")
-            if "tags" in it_copy:
-                if not it_copy["tags"]:
-                    it_copy.pop("tags")
-            
+            # Always ensure parent_item_id is a non-empty string
+            it_copy["parent_item_id"] = it_copy.get("parent_item_id") or "V1"
+            # Always ensure tags is a non-empty array
+            if not isinstance(it_copy.get("tags"), list) or not it_copy["tags"]:
+                it_copy["tags"] = [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
+
             count_val = get_item_count(it_copy.get("quantity"))
             it_copy["quantity"] = {"count": int(count_val)}
             items_with_tags.append(it_copy)
 
-        # Sanitize fulfillments
+        # Sanitize fulfillments - ensure all mandatory RET10 fields are present
         fulfillments_with_tags = []
         for f in (fulfillments or []):
             f_copy = dict(f)
+            # tracking is a mandatory boolean field
+            if "tracking" not in f_copy:
+                f_copy["tracking"] = False
+            # @ondc/org/TAT is mandatory
+            if not f_copy.get("@ondc/org/TAT"):
+                f_copy["@ondc/org/TAT"] = "PT45M"
+            # @ondc/org/provider_name is mandatory
+            if not f_copy.get("@ondc/org/provider_name"):
+                f_copy["@ondc/org/provider_name"] = "FromNear Store"
+
             # Ensure end is present and fully populated
             end = dict(f_copy.get("end", {}))
-            
+
             # Contact
             end_cnt = dict(end.get("contact", {}))
             end_cnt["phone"] = end_cnt.get("phone") or shipping_address.get("phone") or "9876543210"
             end_cnt["email"] = end_cnt.get("email") or shipping_address.get("email") or "buyer@example.com"
             end_cnt["name"] = end_cnt.get("name") or shipping_address.get("name") or "Jane Doe"
             end["contact"] = end_cnt
-            
+
             # Person
             end_pers = dict(end.get("person", {}))
             end_pers["name"] = end_pers.get("name") or end_cnt["name"] or "Jane Doe"
             end["person"] = end_pers
-            
+
             # Location
             end_loc = dict(end.get("location", {}))
             end_loc["gps"] = format_gps(end_loc.get("gps") or "12.9716,77.5946")
-            
+
             # Address
             end_addr = dict(end_loc.get("address", {}))
             end_addr["name"] = end_addr.get("name") or end_cnt["name"] or "Jane Doe"
@@ -382,7 +402,7 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
             end_addr["state"] = end_addr.get("state") or shipping_address.get("state") or "Karnataka"
             end_addr["country"] = end_addr.get("country") or "IND"
             end_addr["area_code"] = end_addr.get("area_code") or shipping_address.get("pincode") or "560001"
-            
+
             end_loc["address"] = end_addr
             end["location"] = end_loc
             f_copy["end"] = end
@@ -504,7 +524,8 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
             "message": {
                 "order": {
                     "id": order_id,
-                    "state": "Accepted",
+                    # RET10: BAP confirm must send state = "Created" (not "Accepted")
+                    "state": "Created",
                     "created_at": created_at or context["timestamp"],
                     "updated_at": updated_at or context["timestamp"],
                     "provider": provider or {
@@ -525,6 +546,8 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
                             "amount": str(amount),
                             "transaction_id": transaction_id,
                         },
+                        # @ondc/org/settlement_basis is MANDATORY per RET10 schema
+                        "@ondc/org/settlement_basis": pay_dict.get("@ondc/org/settlement_basis") or "delivery",
                         "@ondc/org/settlement_window": pay_dict.get("@ondc/org/settlement_window") or "PT1D",
                         "@ondc/org/withholding_amount": pay_dict.get("@ondc/org/withholding_amount") or "0.0",
                         "@ondc/org/settlement_details": settlement_details
