@@ -1,3 +1,6 @@
+from fastapi.testclient import TestClient
+
+from app.main import app
 from app.ondc.bpp.client import BppNetworkClient
 from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload
 from app.ondc.bpp.services.search import _normalize_catalog_quantities
@@ -78,3 +81,13 @@ def test_canonical_order_is_complete_for_every_order_callback_action():
         )
         payload = {"context": {**CONTEXT, "action": action}, "message": {"order": order}}
         assert validate_ret10_payload(action, payload) == []
+
+
+def test_bpp_lookup_aliases_return_protocol_key_arrays():
+    with TestClient(app) as client:
+        for path in ("/lookup", "/api/v1/lookup", "/api/v1/ondc/lookup"):
+            response = client.get(path)
+            assert response.status_code == 200
+            assert isinstance(response.json(), list)
+            assert response.json()[0]["signing_public_key"]
+            assert response.json()[0]["encr_public_key"]

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.api import api_router
+from app.api.endpoints.ondc_bpp import _bpp_lookup_keys
 from app.core.config import settings
 from app.logging.config import setup_logging
 from app.middleware.logging import RequestLoggingMiddleware
@@ -127,6 +128,20 @@ async def protocol_validation_exception_handler(request: Request, exc: ProtocolV
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
+@app.get("/lookup")
+@app.post("/lookup")
+@app.get(f"{settings.API_V1_STR}/lookup")
+@app.post(f"{settings.API_V1_STR}/lookup")
+async def bpp_lookup_alias():
+    """Expose BPP keys at resolver paths used by registry-aware test tools.
+
+    Workbench resolves subscriber keys from the host and from the API root
+    before it tries the registered subscriber URL.  Every supported path must
+    return the protocol's array response, not FastAPI's 404 JSON object.
+    """
+    return _bpp_lookup_keys()
+
+
 @app.get("/")
 def read_root():
     """Welcome endpoint for root navigation checking."""
@@ -135,4 +150,3 @@ def read_root():
         "docs_url": "/docs",
         "health_check": f"{settings.API_V1_STR}/health",
     }
-
