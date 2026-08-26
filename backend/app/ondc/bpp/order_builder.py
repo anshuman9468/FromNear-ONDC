@@ -62,11 +62,46 @@ DEFAULT_QUOTE_DELIVERY_TAGS = [
 ]
 
 
-def _normalize_fulfillment_tags(value: Any) -> List[Dict[str, Any]]:
-    """Keep fulfillment tags as an array without leaking malformed input."""
-    if not isinstance(value, list):
-        return []
-    return [tag for tag in value if isinstance(tag, dict)]
+def _normalize_fulfillment_tags(
+    value: Any,
+    state_code: str,
+    index: int,
+    action: str,
+    timestamp: str,
+) -> List[Dict[str, Any]]:
+    """Return at least one RET10-valid fulfillment tag for every callback."""
+    tags = [tag for tag in value if isinstance(tag, dict)] if isinstance(value, list) else []
+
+    # A merchant-side partial cancellation has a cancellation fulfillment. Do
+    # not let a return_request tag from the inbound order leak into its update.
+    is_cancel_fulfillment = action == "on_update" and index > 0
+    if is_cancel_fulfillment:
+        return [{
+            "code": "cancel_request",
+            "list": [{"code": "reason_id", "value": "011"}],
+        }]
+
+    if tags:
+        return tags
+
+    # RET10 validates update_state as a timestamp tag group. This is also a
+    # safe non-empty fallback for status callbacks where no tag was supplied.
+    if action == "on_update":
+        return [{
+            "code": "update_state",
+            "list": [{"code": "timestamp", "value": timestamp}],
+        }]
+
+    if state_code.startswith("Return") or state_code == "Liquidated":
+        return [{
+            "code": "return_request",
+            "list": [{"code": "id", "value": "RETURN-REQUEST-1"}],
+        }]
+
+    return [{
+        "code": "update_state",
+        "list": [{"code": "timestamp", "value": timestamp}],
+    }]
 
 
 def _now() -> str:
@@ -219,14 +254,18 @@ def format_gps(gps: str) -> str:
         return "12.971599,77.594563"
 
 
-def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_code: str) -> List[Dict[str, Any]]:
+def build_canonical_fulfillments(
+    raw_fulfillments: List[Dict[str, Any]],
+    state_code: str,
+    action: str = "on_status",
+) -> List[Dict[str, Any]]:
     """Enrich fulfillment objects with all mandatory RET10 start/end/state/time fields."""
     if not raw_fulfillments:
         raw_fulfillments = [{}]
 
     enriched = []
     now_str = _now()
-    for f in raw_fulfillments:
+    for index, f in enumerate(raw_fulfillments):
         f_copy = dict(f) if f else {}
         f_copy["id"] = f_copy.get("id", "F1")
         if state_code.startswith("Return") or state_code == "Liquidated":
@@ -237,7 +276,9 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         f_copy["tracking"] = f_copy.get("tracking") if isinstance(f_copy.get("tracking"), bool) else False
         f_copy["@ondc/org/category"] = f_copy.get("@ondc/org/category") or "Standard Delivery"
         f_copy["@ondc/org/TAT"] = f_copy.get("@ondc/org/TAT") or "PT45M"
-        f_copy["tags"] = _normalize_fulfillment_tags(f_copy.get("tags"))
+        f_copy["tags"] = _normalize_fulfillment_tags(
+            f_copy.get("tags"), state_code, index, action, now_str
+        )
         f_copy["state"] = {"descriptor": {"code": state_code}}
 
         # Start location & contact (Store side details)
@@ -489,7 +530,7 @@ def build_canonical_order(
     raw_fulfillments = incoming_order.get("fulfillments", [])
     if not raw_fulfillments and stored_order:
         raw_fulfillments = stored_order.get("fulfillments", [])
-    fulfillments = build_canonical_fulfillments(raw_fulfillments, state_code)
+    fulfillments = build_canonical_fulfillments(raw_fulfillments, state_code, action)
     quote = build_canonical_quote(raw_items)
     payment_source = incoming_order.get("payment") or (stored_order or {}).get("payment", {})
     payment = build_canonical_payment(payment_source, bap_id, quote["price"]["value"])
