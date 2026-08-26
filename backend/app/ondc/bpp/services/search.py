@@ -18,6 +18,12 @@ VALID_FULFILLMENT_TYPES = {"Delivery", "Self-Pickup"}
 ALLOWED_OFFER_DESCRIPTOR_CODES = {"discount", "buyXgetY", "freebie", "slab", "combo", "delivery"}
 FSSAI_LICENSE_NO = "12345678901234"
 
+DEFAULT_STATUTORY_REQUIREMENTS = {
+    "nutritional_info": "Nutritional information available on product packaging",
+    "additives_info": "No artificial additives declared",
+    "brand_owner_FSSAI_license_no": FSSAI_LICENSE_NO,
+}
+
 OFFICIAL_RET10_GROCERY_CATEGORIES = {
     "Fruits and Vegetables", "Masala & Seasoning", "Oil & Ghee", "Eggs, Meat & Fish",
     "Cleaning & Household", "Bakery, Cakes & Dairy", "Pet Care", "Stationery",
@@ -40,11 +46,9 @@ DEFAULT_ITEM_TAGS = [
 
 def _stringify_statutory_fields(statutory: dict) -> dict:
     """Ensure all statutory_reqs_prepackaged_food values are non-empty strings."""
-    if not statutory:
-        return {}
-    result = {}
-    for key, value in statutory.items():
-        result[key] = str(value) if value is not None else ""
+    result = dict(DEFAULT_STATUTORY_REQUIREMENTS)
+    for key, value in (statutory or {}).items():
+        result[key] = str(value) if value is not None and str(value).strip() else result.get(key, "Not applicable")
     return result
 
 
@@ -84,8 +88,13 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
     cat = copy.deepcopy(catalog)
     now_ts = _now()
 
-    desc = cat.get("bpp/descriptor", {})
-    desc_tags = desc.get("tags", [])
+    desc = dict(cat.get("bpp/descriptor") or {})
+    desc["name"] = str(desc.get("name") or "FromNear Grocery")
+    desc["symbol"] = str(desc.get("symbol") or "https://ondc.fromnear.com/assets/logo.png")
+    desc["short_desc"] = str(desc.get("short_desc") or "Everyday grocery essentials from FromNear")
+    desc["long_desc"] = str(desc.get("long_desc") or "FromNear provides grocery products with reliable local delivery.")
+    desc["images"] = desc.get("images") if isinstance(desc.get("images"), list) else []
+    desc_tags = desc.get("tags") if isinstance(desc.get("tags"), list) else []
     if not any(t.get("code") == "bpp_terms" for t in desc_tags):
         desc_tags.append({
             "code": "bpp_terms",
@@ -189,10 +198,9 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
             qty["unitized"] = unitized
             item["quantity"] = qty
 
-            if "@ondc/org/statutory_reqs_prepackaged_food" in item:
-                item["@ondc/org/statutory_reqs_prepackaged_food"] = _stringify_statutory_fields(
-                    item["@ondc/org/statutory_reqs_prepackaged_food"]
-                )
+            item["@ondc/org/statutory_reqs_prepackaged_food"] = _stringify_statutory_fields(
+                item.get("@ondc/org/statutory_reqs_prepackaged_food")
+            )
 
             parent_id = item.get("parent_item_id")
             if not isinstance(parent_id, str) or not parent_id.strip():

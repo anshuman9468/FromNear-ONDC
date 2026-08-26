@@ -15,6 +15,58 @@ class BppNetworkClient:
     def __init__(self):
         self.client = httpx.AsyncClient(timeout=30.0)
 
+    @staticmethod
+    def _canonicalize_message(request_context: dict, action: str, message: dict) -> dict:
+        """Apply the final RET10 completeness guard before signing a callback.
+
+        Individual BPP services build their own response objects, but lifecycle
+        callbacks can also be emitted from helper code.  Canonicalizing at this
+        single network boundary prevents a partially stored order from ever
+        reaching the BAP.
+        """
+        normalized = dict(message) if isinstance(message, dict) else {}
+
+        if action == "on_search" and isinstance(normalized.get("catalog"), dict):
+            # Imported lazily to avoid the search-service/client import cycle.
+            from app.ondc.bpp.services.search import _normalize_catalog_quantities
+
+            normalized["catalog"] = _normalize_catalog_quantities(normalized["catalog"])
+            return normalized
+
+        order_actions = {"on_select", "on_init", "on_confirm", "on_status", "on_update", "on_cancel"}
+        order = normalized.get("order")
+        if action not in order_actions or not isinstance(order, dict):
+            return normalized
+
+        from app.ondc.bpp.order_builder import build_canonical_order
+
+        fulfillment = next(
+            (
+                value for value in order.get("fulfillments", [])
+                if isinstance(value, dict)
+            ),
+            {},
+        )
+        state_code = (
+            fulfillment.get("state", {}).get("descriptor", {}).get("code")
+            or ("Serviceable" if action in {"on_select", "on_init"} else "Pending")
+        )
+        canonical = build_canonical_order(
+            action=action,
+            payload={"context": request_context, "message": {"order": order}},
+            state_code=state_code,
+            order_id=order.get("id"),
+            created_at=order.get("created_at"),
+            updated_at=order.get("updated_at"),
+            stored_order=order,
+            order_state=order.get("state"),
+        )
+        # Lifecycle-specific fields are not part of the generic order builder.
+        if isinstance(order.get("cancellation"), dict):
+            canonical["cancellation"] = order["cancellation"]
+        normalized["order"] = canonical
+        return normalized
+
     def _create_response_context(self, request_context: dict, action: str) -> dict:
         """Create context for a DIRECT callback (on_select, on_init, on_confirm, on_update).
         
@@ -76,7 +128,7 @@ class BppNetworkClient:
         context = self._create_response_context(request_context, action)
         payload = {"context": context, "error": error}
         if message is not None:
-            payload["message"] = message
+            payload["message"] = self._canonicalize_message(request_context, action, message)
 
         body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
         auth_header = generate_auth_header(
@@ -121,7 +173,10 @@ class BppNetworkClient:
         context = self._create_unsolicited_context(base_context, action) if unsolicited \
             else self._create_response_context(base_context, action)
 
-        payload = {"context": context, "message": message}
+        payload = {
+            "context": context,
+            "message": self._canonicalize_message(base_context, action, message),
+        }
         body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
         auth_header = generate_auth_header(
             body_bytes,
