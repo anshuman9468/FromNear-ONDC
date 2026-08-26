@@ -2,6 +2,7 @@ import logging
 import asyncio
 from app.ondc.bpp.client import bpp_client
 from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload, RET10_FULFILLMENT_STATE, _now
+from app.ondc.bpp.state_machine import lifecycle_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,8 @@ class BppCancelService:
         try:
             context = payload.get("context", {})
             message = payload.get("message", {})
+            transaction_id = context.get("transaction_id", "default_tx")
+            lifecycle_tracker.cancel_lifecycle_task(transaction_id)
             order_id = message.get("order_id", "2026-07-27-1001")
             cancellation_reason_id = str(message.get("cancellation_reason_id") or "002")
             if cancellation_reason_id not in VALID_CANCELLATION_REASON_IDS:

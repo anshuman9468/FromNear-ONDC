@@ -22,8 +22,20 @@ class LifecycleTracker:
                 "stored_context": None,
                 "created_at": None,
                 "order_id": None,
+                "lifecycle_task": None,
             }
         return self._store[transaction_id]
+
+    def set_lifecycle_task(self, transaction_id: str, task: Any) -> None:
+        self.get_or_create(transaction_id)["lifecycle_task"] = task
+
+    def cancel_lifecycle_task(self, transaction_id: str) -> bool:
+        task = self.get_or_create(transaction_id).get("lifecycle_task")
+        if task and not task.done():
+            task.cancel()
+            logger.info(f"[LIFECYCLE TRACE] tx={transaction_id} cancelled pending lifecycle task")
+            return True
+        return False
 
     def store_order(self, transaction_id: str, order: Dict[str, Any], context: Dict[str, Any], created_at: str, order_id: str):
         session = self.get_or_create(transaction_id)

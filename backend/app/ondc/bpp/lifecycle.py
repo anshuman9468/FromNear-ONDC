@@ -149,6 +149,9 @@ async def push_post_confirm_lifecycle(
 
     await asyncio.sleep(0.5)
 
+    # Let buyer-side cancel arrive before delivery-status pushes begin.
+    await asyncio.sleep(2.0)
+
     # Workbench return flows expect the full delivery status progression before update.
     for state_code in PREPAID_STATUS_SEQUENCE:
         await asyncio.sleep(0.5)

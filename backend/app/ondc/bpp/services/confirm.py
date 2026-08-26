@@ -50,6 +50,8 @@ class BppConfirmService:
         lifecycle_tracker.record_callback(transaction_id, "on_confirm", RET10_FULFILLMENT_STATE["PENDING"])
 
         # Push unsolicited lifecycle callbacks before returning ACK (Cloud Run requirement).
+        # Buyer-side cancellation must be able to cancel this pending task.
+        lifecycle_tracker.set_lifecycle_task(transaction_id, asyncio.current_task())
         await push_post_confirm_lifecycle(context, payload, order_id, created_at, order_obj)
 
     async def handle_confirm(self, payload: dict):
