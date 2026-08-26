@@ -487,7 +487,9 @@ def build_canonical_tags(include_bap_terms: bool = False) -> List[Dict[str, Any]
         tags.append({
             "code": "bap_terms",
             "list": [
-                {"code": "accept_bap_terms", "value": "Y"},
+                # RET10 calls this acceptance flag accept_bpp_terms even
+                # though it is carried inside the bap_terms tag.
+                {"code": "accept_bpp_terms", "value": "Y"},
             ]
         })
     return tags
