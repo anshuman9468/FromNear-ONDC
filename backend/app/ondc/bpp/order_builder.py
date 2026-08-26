@@ -31,8 +31,10 @@ ISO_UTC_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 DEFAULT_PARENT_ITEM_ID = "V1"
 DEFAULT_ITEM_TAGS = [
     {
-        "descriptor": {"code": "title"},
-        "list": [{"descriptor": {"code": "type"}, "value": "item"}],
+        "code": "np_fees",
+        "list": [
+            {"code": "id", "value": "FINDER_FEE"},
+        ],
     }
 ]
 DEFAULT_DELIVERY_TAGS = [
@@ -41,6 +43,30 @@ DEFAULT_DELIVERY_TAGS = [
         "list": [{"descriptor": {"code": "type"}, "value": "delivery"}],
     }
 ]
+DEFAULT_QUOTE_ITEM_TAGS = [
+    {
+        # RET10 BPP quote breakup metadata uses the quote tag vocabulary.
+        "code": "quote",
+        "list": [
+            {"code": "type", "value": "item"},
+        ],
+    }
+]
+DEFAULT_QUOTE_DELIVERY_TAGS = [
+    {
+        "code": "quote",
+        "list": [
+            {"code": "type", "value": "fulfillment"},
+        ],
+    }
+]
+
+
+def _normalize_fulfillment_tags(value: Any) -> List[Dict[str, Any]]:
+    """Keep fulfillment tags as an array without leaking malformed input."""
+    if not isinstance(value, list):
+        return []
+    return [tag for tag in value if isinstance(tag, dict)]
 
 
 def _now() -> str:
@@ -57,12 +83,22 @@ def _get_catalog_item_map() -> Dict[str, Dict[str, Any]]:
 
 
 def _resolve_item_tags(catalog_item: Optional[Dict[str, Any]], incoming_tags: Any = None) -> List[Dict[str, Any]]:
-    """Return a non-empty tags array — Pramaan rejects missing or empty tags."""
+    """Return order.items tags using only codes allowed by Pramaan."""
+    allowed_codes = {"np_fees", "rto_action"}
     if isinstance(incoming_tags, list) and len(incoming_tags) > 0:
-        return incoming_tags
-    catalog_tags = catalog_item.get("tags") if catalog_item else None
-    if isinstance(catalog_tags, list) and len(catalog_tags) > 0:
-        return catalog_tags
+        filtered_tags = []
+        for tag in incoming_tags:
+            if not isinstance(tag, dict) or tag.get("code") not in allowed_codes:
+                continue
+            tag_copy = dict(tag)
+            if tag_copy.get("code") == "np_fees":
+                tag_copy["list"] = [
+                    item for item in tag_copy.get("list", [])
+                    if isinstance(item, dict) and item.get("code") == "id"
+                ] or DEFAULT_ITEM_TAGS[0]["list"]
+            filtered_tags.append(tag_copy)
+        if filtered_tags:
+            return filtered_tags
     return DEFAULT_ITEM_TAGS
 
 
@@ -93,7 +129,8 @@ def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any
         },
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
-        "tags": _resolve_item_tags(catalog_item),
+        # Quote-breakup tags have a distinct RET10 BPP vocabulary.
+        "tags": DEFAULT_QUOTE_ITEM_TAGS,
     }
 
 
@@ -156,7 +193,7 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         "price": {"currency": "INR", "value": f"{delivery_charge:.2f}"},
         "item": {
             **_build_quote_item_details("F1", None, delivery_charge),
-            "tags": DEFAULT_DELIVERY_TAGS,
+            "tags": DEFAULT_QUOTE_DELIVERY_TAGS,
         }
     })
 
@@ -197,10 +234,10 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         else:
             f_copy["type"] = f_copy.get("type", "Delivery")
         f_copy["@ondc/org/provider_name"] = f_copy.get("@ondc/org/provider_name") or "FromNear Store"
-        f_copy["tracking"] = f_copy.get("tracking", False)
+        f_copy["tracking"] = f_copy.get("tracking") if isinstance(f_copy.get("tracking"), bool) else False
         f_copy["@ondc/org/category"] = f_copy.get("@ondc/org/category") or "Standard Delivery"
         f_copy["@ondc/org/TAT"] = f_copy.get("@ondc/org/TAT") or "PT45M"
-        f_copy["tags"] = f_copy.get("tags", [])
+        f_copy["tags"] = _normalize_fulfillment_tags(f_copy.get("tags"))
         f_copy["state"] = {"descriptor": {"code": state_code}}
 
         # Start location & contact (Store side details)
@@ -232,8 +269,7 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
                 "start": now_str,
                 "end": now_str
             }
-        if state_code in ("Order-picked-up", "Out-for-delivery", "Order-delivered", "RTO-Initiated", "RTO-Delivered", "Cancelled"):
-            start_time["timestamp"] = start_time.get("timestamp") or now_str
+        start_time["timestamp"] = start_time.get("timestamp") or now_str
         start["time"] = start_time
         f_copy["start"] = start
 
@@ -255,6 +291,9 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
         # 3. Location & Address
         end_loc = dict(end.get("location", {}))
         end_loc["id"] = end_loc.get("id") or "L2"
+        end_desc = dict(end_loc.get("descriptor", {}))
+        end_desc["name"] = end_desc.get("name") or "Buyer Delivery Location"
+        end_loc["descriptor"] = end_desc
         end_loc["gps"] = format_gps(end_loc.get("gps") or "12.971599,77.594563")
         
         end_addr = dict(end_loc.get("address", {}))
@@ -276,8 +315,7 @@ def build_canonical_fulfillments(raw_fulfillments: List[Dict[str, Any]], state_c
                 "start": now_str,
                 "end": now_str
             }
-        if state_code in ("Order-delivered", "RTO-Delivered"):
-            end_time["timestamp"] = end_time.get("timestamp") or now_str
+        end_time["timestamp"] = end_time.get("timestamp") or now_str
         end["time"] = end_time
 
         # 5. Instructions
@@ -301,6 +339,7 @@ def build_canonical_billing(raw_billing: Dict[str, Any], created_at: str, update
     billing = dict(raw_billing) if raw_billing else {}
     billing["name"] = billing.get("name") or "John Doe"
     billing["phone"] = billing.get("phone") or "9876543210"
+    billing["email"] = billing.get("email") or "buyer@example.com"
     billing["created_at"] = billing.get("created_at") or created_at
     billing["updated_at"] = billing.get("updated_at") or updated_at
 
@@ -392,7 +431,7 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
 
 
 def build_canonical_tags(include_bap_terms: bool = False) -> List[Dict[str, Any]]:
-    """Build mandatory tags containing bpp_terms and optional bap_terms."""
+    """Build only RET10 order-tag list codes accepted in BPP callbacks."""
     tags = [
         {
             "code": "bpp_terms",
@@ -407,12 +446,7 @@ def build_canonical_tags(include_bap_terms: bool = False) -> List[Dict[str, Any]
         tags.append({
             "code": "bap_terms",
             "list": [
-                {"code": "accept_bpp_terms", "value": "Y"},
-                {"code": "max_liability", "value": "2"},
-                {"code": "max_liability_cap", "value": "10000"},
-                {"code": "mandatory_arbitration", "value": "y"},
-                {"code": "court_jurisdiction", "value": "Bengaluru"},
-                {"code": "delay_interest", "value": "1000"}
+                {"code": "accept_bap_terms", "value": "Y"},
             ]
         })
     return tags
@@ -442,7 +476,9 @@ def build_canonical_order(
 
     ord_id = order_id or incoming_order.get("id") or message.get("order_id") or "2026-07-27-1001"
     ord_created_at = created_at or incoming_order.get("created_at") or now_str
-    ord_updated_at = updated_at or now_str
+    # Synchronous callbacks must retain the request's order timestamp when supplied.
+    # This lets BAP and BPP agree on the same order revision during verification.
+    ord_updated_at = updated_at or incoming_order.get("updated_at") or now_str
 
     raw_items = incoming_order.get("items", [])
     if not raw_items:
@@ -491,7 +527,7 @@ def build_canonical_order(
         elif state_code == "Packed" and action == "on_update":
             order_obj["state"] = "In-progress"
         else:
-            order_obj["state"] = "In-Progress"
+            order_obj["state"] = "In-progress"
         order_obj["created_at"] = ord_created_at
         order_obj["updated_at"] = ord_updated_at
 
@@ -521,6 +557,10 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
 
     # 2. Lifecycle action specific checks
     if action in ("on_confirm", "on_status", "on_update", "on_cancel"):
+        allowed_order_states = {"Created", "Accepted", "In-progress", "Completed", "Cancelled"}
+        if order.get("state") not in allowed_order_states:
+            errors.append(f"Order state must be one of {sorted(allowed_order_states)}")
+
         if not order.get("id"):
             errors.append("Order missing mandatory field: order.id")
 
@@ -625,6 +665,20 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
             errors.append(f"Item[{idx}] missing parent_item_id string")
         if not isinstance(it.get("tags"), list):
             errors.append(f"Item[{idx}] missing tags array")
+        else:
+            allowed_item_tag_codes = {"np_fees", "rto_action"}
+            for tag_idx, tag in enumerate(it.get("tags", [])):
+                tag_code = tag.get("code") if isinstance(tag, dict) else None
+                if tag_code not in allowed_item_tag_codes:
+                    errors.append(
+                        f"Item[{idx}].tags[{tag_idx}].code must be one of {sorted(allowed_item_tag_codes)}"
+                    )
+                if tag_code == "np_fees":
+                    for list_idx, list_item in enumerate(tag.get("list", [])):
+                        if isinstance(list_item, dict) and list_item.get("code") != "id":
+                            errors.append(
+                                f"Item[{idx}].tags[{tag_idx}].list[{list_idx}].code must be 'id'"
+                            )
 
     # 8. Quote breakup validation
     breakup = order.get("quote", {}).get("breakup", [])
@@ -639,6 +693,25 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
             errors.append(f"Quote breakup[{idx}].item missing parent_item_id string")
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
+        else:
+            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
+            allowed_quote_type_values = {"fulfillment", "order", "item"}
+            for tag_idx, tag in enumerate(item.get("tags", [])):
+                tag_code = tag.get("code") if isinstance(tag, dict) else None
+                if tag_code not in allowed_quote_tag_codes:
+                    errors.append(
+                        f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
+                    )
+                if tag_code == "quote":
+                    for list_idx, list_item in enumerate(tag.get("list", [])):
+                        if (
+                            isinstance(list_item, dict)
+                            and list_item.get("code") == "type"
+                            and list_item.get("value") not in allowed_quote_type_values
+                        ):
+                            errors.append(
+                                f"Quote breakup[{idx}].item.tags[{tag_idx}].list[{list_idx}].value must be one of {sorted(allowed_quote_type_values)}"
+                            )
         if not item.get("price"):
             errors.append(f"Quote breakup[{idx}].item missing price object")
         if not item.get("quantity"):

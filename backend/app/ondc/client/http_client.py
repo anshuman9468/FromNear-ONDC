@@ -46,6 +46,9 @@ class ONDCHttpClient:
         sign: bool = True,
         headers: Optional[Dict[str, str]] = None,
         retries: int = 3,
+        subscriber_id: Optional[str] = None,
+        unique_key_id: Optional[str] = None,
+        private_key_str: Optional[str] = None,
     ) -> ONDCResponse:
         """Send a signed POST request to an ONDC participant or gateway."""
         headers = headers or {}
@@ -60,14 +63,19 @@ class ONDCHttpClient:
         
         # Automatically sign the payload if requested
         if sign:
-            private_key = settings.ONDC_SIGNING_PRIVATE_KEY
+            private_key = private_key_str or settings.ONDC_SIGNING_PRIVATE_KEY
             if not private_key or private_key.strip() == "" or "INSERT_" in private_key:
                 logger.error("ONDC signing private key is missing or not configured.")
                 raise SigningConfigurationError(
                     "ONDC signing key not configured: Ed25519 private key missing"
                 )
             try:
-                auth_header = generate_auth_header(body_bytes)
+                auth_header = generate_auth_header(
+                    body_bytes,
+                    subscriber_id=subscriber_id,
+                    unique_key_id=unique_key_id,
+                    private_key_str=private_key,
+                )
                 headers["Authorization"] = auth_header
             except ValueError as val_err:
                 logger.error(f"ONDC signing private key could not be loaded: {str(val_err)}")
@@ -240,10 +248,21 @@ async def safe_ondc_post(
     message_id: str,
     sign: bool = True,
     retries: int = 3,
+    subscriber_id: Optional[str] = None,
+    unique_key_id: Optional[str] = None,
+    private_key_str: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Wraps ondc_http_client.post with comprehensive error handling to prevent unhandled exceptions and return structured errors."""
     try:
-        response = await ondc_http_client.post(url, payload, sign=sign, retries=retries)
+        response = await ondc_http_client.post(
+            url,
+            payload,
+            sign=sign,
+            retries=retries,
+            subscriber_id=subscriber_id,
+            unique_key_id=unique_key_id,
+            private_key_str=private_key_str,
+        )
         
         try:
             resp_json = response.json() if hasattr(response, 'json') else json.loads(response.text)
@@ -284,4 +303,3 @@ async def safe_ondc_post(
             "error_type": type(e).__name__,
             "error_message": str(e)
         }
-

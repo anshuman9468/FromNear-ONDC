@@ -94,8 +94,8 @@ confirm_payload = {
 res = requests.post(f"{BASE_URL}/confirm", json=confirm_payload)
 check_status(res, "CONFIRM")
 
-print("Waiting 75 seconds for automated on_status webhooks (Steps 7-12) to complete before 1st update...")
-time.sleep(75)
+print("Wait until Workbench shows Step 13: update as WAITING / YOU SEND.")
+input("Press Enter to send Step 13 UPDATE 1...")
 
 # 4. UPDATE 1 (Step 13)
 print(">>> Step 13: Sending 1st /update request...")
@@ -106,8 +106,8 @@ update_payload = {
 res = requests.post(f"{BASE_URL}/update", json=update_payload)
 check_status(res, "UPDATE 1")
 
-print("Waiting 40 seconds for on_update webhooks (Steps 14, 15, 16) to complete before 2nd update...")
-time.sleep(40)
+print("Wait until Workbench shows Step 17: update as YOU SEND.")
+input("Press Enter to send Step 17 UPDATE 2...")
 
 # 5. UPDATE 2 (Step 17) — confirm return pickup by buyer
 # Step 16 on_update from mock seller sets Return fulfillment to Return_Picked.

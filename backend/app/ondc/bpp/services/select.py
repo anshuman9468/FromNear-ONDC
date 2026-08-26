@@ -3,6 +3,7 @@ import asyncio
 from app.ondc.bpp.client import bpp_client
 from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload
 from app.ondc.bpp.state_machine import lifecycle_tracker
+from app.ondc.bpp.lifecycle import is_out_of_stock_flow
 
 logger = logging.getLogger(__name__)
 
@@ -15,28 +16,36 @@ class BppSelectService:
 
         await asyncio.sleep(0.5)
 
-        # Out-of-stock flow: second select returns domain error for unavailable item.
-        if select_count >= 2:
-            order_obj = build_canonical_order(
-                action="on_select",
-                payload=payload,
-                state_code="Serviceable",
-            )
-            order_obj["error"] = {
-                "type": "DOMAIN-ERROR",
-                "code": "40002",
-                "message": "Item quantity unavailable",
-            }
-            # Mark item as unavailable in quote
+        order_obj = build_canonical_order(
+            action="on_select",
+            payload=payload,
+            state_code="Non-serviceable" if is_out_of_stock_flow() and select_count >= 2 else "Serviceable",
+        )
+
+        # Out-of-stock flow: Workbench's second select expects an ONDC domain
+        # error at callback root, not an invalid message.order.error field.
+        if is_out_of_stock_flow() and select_count >= 2:
             for item in order_obj.get("items", []):
-                if "quantity" in item and "selected" in item["quantity"]:
-                    item["quantity"]["selected"]["count"] = 0
-        else:
-            order_obj = build_canonical_order(
-                action="on_select",
-                payload=payload,
-                state_code="Serviceable",
+                item.get("quantity", {}).setdefault("selected", {})["count"] = 0
+
+            lifecycle_tracker.store_order(
+                transaction_id,
+                order_obj,
+                context,
+                order_obj.get("created_at") or context.get("timestamp"),
+                order_obj.get("id", "pending"),
             )
+            await bpp_client.send_callback_error(
+                context,
+                "on_select",
+                {
+                    "type": "DOMAIN-ERROR",
+                    "code": "40002",
+                    "message": "Item quantity unavailable",
+                },
+                {"order": order_obj},
+            )
+            return
 
         response_message = {"order": order_obj}
         response_payload = {

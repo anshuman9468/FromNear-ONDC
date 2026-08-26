@@ -66,6 +66,51 @@ class BppNetworkClient:
         """Send an unsolicited push — generates a new message_id."""
         await self._post(base_context, action, message, unsolicited=True)
 
+    async def send_callback_error(self, request_context: dict, action: str, error: dict, message: dict | None = None):
+        """Send a direct callback with a root ONDC error object."""
+        target_uri = request_context.get("bap_uri")
+        if not target_uri:
+            logger.error("No bap_uri found in context. Cannot send error callback.")
+            return
+
+        context = self._create_response_context(request_context, action)
+        payload = {"context": context, "error": error}
+        if message is not None:
+            payload["message"] = message
+
+        body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+        auth_header = generate_auth_header(
+            body_bytes,
+            unique_key_id=settings.ONDC_BPP_UNIQUE_KEY_ID or settings.ONDC_UNIQUE_KEY_ID,
+            private_key_str=settings.ONDC_BPP_SIGNING_PRIVATE_KEY or settings.ONDC_SIGNING_PRIVATE_KEY,
+        )
+        url = f"{target_uri.rstrip('/')}/{action}"
+        headers = {"Content-Type": "application/json", "Authorization": auth_header}
+
+        logger.info(
+            f"\n=== LIFECYCLE TRACE OUTBOUND ERROR ===\n"
+            f"Timestamp: {context.get('timestamp')}\n"
+            f"Action: {action}\n"
+            f"Transaction ID: {context.get('transaction_id')}\n"
+            f"Message ID: {context.get('message_id')}\n"
+            f"Request URL: {url}\n"
+            f"HTTP Method: POST\n"
+            f"Error: {error}\n"
+        )
+
+        try:
+            response = await self.client.post(url, content=body_bytes, headers=headers)
+            response.raise_for_status()
+            logger.info(
+                "=== LIFECYCLE TRACE OUTBOUND SUCCESS ===\n"
+                f"Action: {action}, HTTP Status: {response.status_code}, "
+                f"Response: {response.text}"
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"=== LIFECYCLE TRACE OUTBOUND FAILED ===\nAction: {action}, HTTP Status: {e.response.status_code}, Error: {e.response.text}")
+        except Exception as e:
+            logger.error(f"=== LIFECYCLE TRACE OUTBOUND FAILED ===\nAction: {action}, Error: {str(e)}")
+
     async def _post(self, base_context: dict, action: str, message: dict, unsolicited: bool):
         """Internal: build and POST the callback payload."""
         target_uri = base_context.get("bap_uri")
@@ -78,7 +123,11 @@ class BppNetworkClient:
 
         payload = {"context": context, "message": message}
         body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
-        auth_header = generate_auth_header(body_bytes)
+        auth_header = generate_auth_header(
+            body_bytes,
+            unique_key_id=settings.ONDC_BPP_UNIQUE_KEY_ID or settings.ONDC_UNIQUE_KEY_ID,
+            private_key_str=settings.ONDC_BPP_SIGNING_PRIVATE_KEY or settings.ONDC_SIGNING_PRIVATE_KEY,
+        )
 
         headers = {
             "Content-Type": "application/json",
@@ -112,7 +161,11 @@ class BppNetworkClient:
         try:
             response = await self.client.post(url, content=body_bytes, headers=headers)
             response.raise_for_status()
-            logger.info(f"=== LIFECYCLE TRACE OUTBOUND SUCCESS ===\nAction: {action}, HTTP Status: {response.status_code}")
+            logger.info(
+                "=== LIFECYCLE TRACE OUTBOUND SUCCESS ===\n"
+                f"Action: {action}, HTTP Status: {response.status_code}, "
+                f"Response: {response.text}"
+            )
         except httpx.HTTPStatusError as e:
             logger.error(f"=== LIFECYCLE TRACE OUTBOUND FAILED ===\nAction: {action}, HTTP Status: {e.response.status_code}, Error: {e.response.text}")
         except Exception as e:

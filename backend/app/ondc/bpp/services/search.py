@@ -4,15 +4,18 @@ import asyncio
 import copy
 import re
 from pathlib import Path
+from app.core.settings import settings
 from app.ondc.bpp.client import bpp_client
 from app.ondc.bpp.order_builder import _now
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_PROVIDER_TAG_CODES = {"timing", "close_timing", "serviceability", "order_value", "np_fees", "FSSAI", "bpp_terms"}
+ALLOWED_PROVIDER_TAG_CODES = {"timing", "close_timing", "serviceability", "order_value", "np_fees"}
+ALLOWED_ITEM_TAG_CODES = {"origin", "veg_nonveg", "image", "timing", "np_fees"}
 CATEGORY_ID_REGEX = re.compile(r"^[a-zA-Z0-9]{1,12}$")
 ALLOWED_UNITS = {"unit", "dozen", "gram", "kilogram", "tonne", "litre", "millilitre"}
 VALID_FULFILLMENT_TYPES = {"Delivery", "Self-Pickup"}
+ALLOWED_OFFER_DESCRIPTOR_CODES = {"discount", "buyXgetY", "freebie", "slab", "combo", "delivery"}
 FSSAI_LICENSE_NO = "12345678901234"
 
 OFFICIAL_RET10_GROCERY_CATEGORIES = {
@@ -29,8 +32,8 @@ OFFICIAL_RET10_GROCERY_CATEGORIES = {
 
 DEFAULT_ITEM_TAGS = [
     {
-        "code": "type",
-        "list": [{"code": "type", "value": "item"}],
+        "code": "np_fees",
+        "list": [{"code": "id", "value": "FINDER_FEE"}],
     }
 ]
 
@@ -105,30 +108,28 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
         provider["time"]["label"] = provider["time"].get("label", "enable")
         provider["time"]["timestamp"] = now_ts
 
-        p_tags = provider.get("tags", [])
-        if not any(t.get("code") == "FSSAI" for t in p_tags):
-            p_tags.append({
-                "code": "FSSAI",
-                "list": [{"code": "license_no", "value": FSSAI_LICENSE_NO}],
-            })
-        if not any(t.get("code") == "bpp_terms" for t in p_tags):
-            p_tags.append({
-                "code": "bpp_terms",
-                "list": [{"code": "np_type", "value": "MSN"}],
-            })
-        provider["tags"] = [t for t in p_tags if t.get("code") in ALLOWED_PROVIDER_TAG_CODES]
+        provider["tags"] = [
+            t for t in provider.get("tags", [])
+            if isinstance(t, dict) and t.get("code") in ALLOWED_PROVIDER_TAG_CODES
+        ]
 
         for loc in provider.get("locations", []):
             if "time" not in loc:
                 loc["time"] = {}
             loc["time"]["label"] = loc["time"].get("label", "enable")
             loc["time"]["timestamp"] = now_ts
-            if isinstance(loc["time"].get("days"), str):
-                loc["time"]["days"] = loc["time"]["days"].split(",")
+            days = loc["time"].get("days")
+            if isinstance(days, list):
+                loc["time"]["days"] = ",".join(str(day) for day in days)
+            elif isinstance(days, str) and days.strip():
+                loc["time"]["days"] = days
             else:
-                loc["time"]["days"] = loc["time"].get("days") or ["1", "2", "3", "4", "5", "6", "7"]
-            if "range" not in loc["time"]:
-                loc["time"]["range"] = {"start": "0900", "end": "2100"}
+                loc["time"]["days"] = "1,2,3,4,5,6,7"
+            # RET10 catalog locations use HHMM store hours, not ISO timestamps.
+            loc["time"]["range"] = {
+                "start": "0900",
+                "end": "2100",
+            }
             if "schedule" not in loc["time"]:
                 loc["time"]["schedule"] = {"holidays": ["2026-01-01"]}
             elif not loc["time"]["schedule"].get("holidays"):
@@ -139,6 +140,19 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
             cat_id = category.get("id", f"CAT00{idx+1}")
             if not CATEGORY_ID_REGEX.match(cat_id):
                 category["id"] = f"CAT00{idx+1}"
+            descriptor = category.get("descriptor")
+            category["descriptor"] = descriptor if isinstance(descriptor, dict) else {
+                "name": "Atta, Flours and Sooji"
+            }
+            category["tags"] = category.get("tags") if isinstance(category.get("tags"), list) else []
+        # All purchasable variants in the mock catalog have parent_item_id V1.
+        # Advertise that parent explicitly so catalog consumers can resolve it.
+        if not any(category.get("id") == "V1" for category in categories if isinstance(category, dict)):
+            categories.append({
+                "id": "V1",
+                "descriptor": {"name": "Product Variants"},
+                "tags": [{"code": "type", "list": [{"code": "type", "value": "variant_group"}]}],
+            })
         provider["categories"] = categories
 
         for item in provider.get("items", []):
@@ -184,20 +198,63 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
             if not isinstance(parent_id, str) or not parent_id.strip():
                 item["parent_item_id"] = "V1"
 
-            if not item.get("tags"):
+            item["tags"] = [
+                tag for tag in item.get("tags", [])
+                if isinstance(tag, dict) and tag.get("code") in ALLOWED_ITEM_TAG_CODES
+            ]
+            if not item["tags"]:
                 item["tags"] = DEFAULT_ITEM_TAGS
 
-        if not isinstance(provider.get("creds"), list):
-            provider["creds"] = [{
-                "id": "C1",
-                "type": "FSSAI",
-                "url": "https://fssai.gov.in",
-            }]
-        if not isinstance(provider.get("offers"), list):
-            provider["offers"] = [{
-                "id": "O1",
-                "descriptor": {"name": "5% Off on First Order"},
-            }]
+        raw_creds = provider.get("creds") if isinstance(provider.get("creds"), list) else [{}]
+        provider["creds"] = [
+            {
+                **(cred if isinstance(cred, dict) else {}),
+                "id": str((cred if isinstance(cred, dict) else {}).get("id") or f"C{index + 1}"),
+                "type": str((cred if isinstance(cred, dict) else {}).get("type") or "FSSAI"),
+                "url": str((cred if isinstance(cred, dict) else {}).get("url") or "https://fssai.gov.in"),
+                "descriptor": {
+                    **((cred if isinstance(cred, dict) else {}).get("descriptor", {})),
+                    "code": str(((cred if isinstance(cred, dict) else {}).get("descriptor", {}) or {}).get("code") or "FSSAI"),
+                    "name": str(((cred if isinstance(cred, dict) else {}).get("descriptor", {}) or {}).get("name") or "FSSAI License"),
+                },
+                "tags": ((cred if isinstance(cred, dict) else {}).get("tags")
+                         if isinstance((cred if isinstance(cred, dict) else {}).get("tags"), list) else []),
+            }
+            for index, cred in enumerate(raw_creds)
+        ]
+
+        item_ids = [str(item.get("id")) for item in provider.get("items", []) if item.get("id")]
+        location_ids = [str(location.get("id")) for location in provider.get("locations", []) if location.get("id")]
+        raw_offers = provider.get("offers") if isinstance(provider.get("offers"), list) else [{}]
+        provider["offers"] = [
+            {
+                **(offer if isinstance(offer, dict) else {}),
+                "id": str((offer if isinstance(offer, dict) else {}).get("id") or f"O{index + 1}"),
+                "descriptor": {
+                    **((offer if isinstance(offer, dict) else {}).get("descriptor", {})),
+                    "code": (
+                        str(((offer if isinstance(offer, dict) else {}).get("descriptor", {}) or {}).get("code"))
+                        if str(((offer if isinstance(offer, dict) else {}).get("descriptor", {}) or {}).get("code"))
+                        in ALLOWED_OFFER_DESCRIPTOR_CODES
+                        else "discount"
+                    ),
+                    "name": str(((offer if isinstance(offer, dict) else {}).get("descriptor", {}) or {}).get("name") or "Store Offer"),
+                    "images": (((offer if isinstance(offer, dict) else {}).get("descriptor", {}) or {}).get("images")
+                               if isinstance(((offer if isinstance(offer, dict) else {}).get("descriptor", {}) or {}).get("images"), list) else []),
+                },
+                "location_ids": ((offer if isinstance(offer, dict) else {}).get("location_ids")
+                                 if isinstance((offer if isinstance(offer, dict) else {}).get("location_ids"), list) else location_ids),
+                "item_ids": ((offer if isinstance(offer, dict) else {}).get("item_ids")
+                             if isinstance((offer if isinstance(offer, dict) else {}).get("item_ids"), list) else item_ids),
+                "time": {
+                    "label": "enable",
+                    "range": {"start": "0900", "end": "2100"},
+                },
+                "tags": ((offer if isinstance(offer, dict) else {}).get("tags")
+                         if isinstance((offer if isinstance(offer, dict) else {}).get("tags"), list) else []),
+            }
+            for index, offer in enumerate(raw_offers)
+        ]
 
     cat["bpp/fulfillments"] = _build_catalog_fulfillments(providers)
     cat["bpp/providers"] = providers
@@ -228,6 +285,48 @@ def _is_incremental_push(payload: dict) -> bool:
     return False
 
 
+def _is_custom_menu_push_flow() -> bool:
+    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {
+        "custom_menu_push",
+        "incremental_push",
+        "catalog_push",
+    }
+
+
+def _make_incremental_catalog(catalog: dict, search_count: int) -> dict:
+    """Create a stable catalog snapshot for incremental custom-menu pushes."""
+    pushed_catalog = _normalize_catalog_quantities(catalog)
+    providers = pushed_catalog.get("bpp/providers", [])
+    if not providers:
+        return pushed_catalog
+
+    provider = providers[0]
+    provider["ttl"] = "PT15M"
+    provider["time"]["timestamp"] = _now()
+
+    items = provider.get("items", [])
+    if search_count >= 2 and items:
+        # Second Workbench search is the delta/custom-menu update.
+        provider["items"] = [
+            {
+                **items[0],
+                "id": items[0].get("id", "I1"),
+                "descriptor": {
+                    **items[0].get("descriptor", {}),
+                    "name": "Updated Custom Menu - Atta Whole Wheat Flour 5kg",
+                },
+                "price": {
+                    **items[0].get("price", {}),
+                    "currency": "INR",
+                    "value": "245.00",
+                    "maximum_value": "250.00",
+                },
+                "time": {"label": "enable", "timestamp": _now()},
+            }
+        ]
+    return pushed_catalog
+
+
 class BppSearchService:
     def __init__(self):
         catalog_path = Path(__file__).parent.parent / "catalog" / "mock_catalog.json"
@@ -248,13 +347,27 @@ class BppSearchService:
 
         await asyncio.sleep(0.5)
 
-        normalized_catalog = _normalize_catalog_quantities(self.mock_catalog)
+        normalized_catalog = _make_incremental_catalog(self.mock_catalog, search_count)
 
-        # Incremental push flow: send 3 unsolicited on_search before the direct response.
+        if _is_custom_menu_push_flow():
+            # Workbench records the first on_search as the direct response to
+            # /search, then accepts the remaining catalog deltas as pushes.
+            await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
+            push_count = 2 if search_count == 1 else 0
+            for _ in range(push_count):
+                await bpp_client.send_unsolicited(context, "on_search", {"catalog": normalized_catalog})
+                await asyncio.sleep(0.5)
+            return
+
+        # The first on_search is the synchronous response paired with /search.
+        # Workbench rejects a push received before that response as having no
+        # matching sync response.  Follow it with two unsolicited catalog deltas.
         if search_count == 1 and (_is_incremental_push(payload) or _is_incremental_search(payload)):
-            for _ in range(3):
+            await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
+            for _ in range(2):
                 await bpp_client.send_unsolicited(context, "on_search", {"catalog": normalized_catalog})
                 await asyncio.sleep(0.3)
+            return
 
         await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
 

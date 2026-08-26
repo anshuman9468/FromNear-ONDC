@@ -16,7 +16,7 @@ class CancelService:
         db: AsyncSession,
         *,
         transaction_id: str,
-        cancellation_reason_id: str = "001",
+        cancellation_reason_id: str = "002",
     ) -> Dict[str, str]:
         """Build and send a standard ONDC /cancel request to the BPP."""
         message_id = str(uuid.uuid4())

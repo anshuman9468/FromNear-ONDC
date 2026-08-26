@@ -79,6 +79,8 @@ class UpdateService:
         
         for f in deduped_raw_fulfillments:
             f_copy = dict(f)
+            if f_copy.get("type") == "Return":
+                has_return_tag = True
             if update_target == "fulfillment" and f_copy.get("type") == "Return":
                 f_copy["state"] = {"descriptor": {"code": "Return_Delivered"}}
 
@@ -110,10 +112,18 @@ class UpdateService:
                             ]
                     filtered_tags.append(t_copy)
 
-            if filtered_tags:
-                f_copy["tags"] = filtered_tags
-            else:
-                f_copy.pop("tags", None)
+            # Buyer-initiated return scenarios only accept ``return_request``
+            # tags.  Never reflect seller-only tags such as update_state,
+            # cancel_request, or quote_trail back to the seller: Workbench
+            # validates every fulfillment in this request against that contract.
+            return_tags = [tag for tag in filtered_tags if tag.get("code") == "return_request"]
+            if not return_tags:
+                return_tags = [{
+                    "code": "return_request",
+                    "list": [{"code": "id", "value": f_copy.get("id") or fulfillment_id_val}],
+                }]
+            filtered_tags = return_tags
+            f_copy["tags"] = filtered_tags
             cleaned_fulfillments.append(f_copy)
 
         if not has_return_tag and update_target != "fulfillment":
@@ -149,10 +159,12 @@ class UpdateService:
                     seen_items.add(item_id)
                     item_copy = dict(item)
                     item_copy["quantity"] = {"count": 1}
+                    item_copy["parent_item_id"] = str(item_copy.get("parent_item_id") or "V1")
+                    item_copy["tags"] = item_copy.get("tags") if isinstance(item_copy.get("tags"), list) else []
                     item_copy.pop("fulfillment_id", None)
                     cleaned_items.append(item_copy)
         if not cleaned_items:
-            cleaned_items = [{"id": "I1", "quantity": {"count": 1}}]
+            cleaned_items = [{"id": "I1", "quantity": {"count": 1}, "parent_item_id": "V1", "tags": []}]
 
         order_payload = custom_order or {
             "id": order.order_id,

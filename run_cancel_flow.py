@@ -16,11 +16,16 @@ print(f"==================================================\n")
 
 def check_status(response, step_name):
     print(f"[{step_name}] Status Code: {response.status_code}")
+    data = None
     try:
-        print(f"[{step_name}] Response: {response.json()}\n")
+        data = response.json()
+        print(f"[{step_name}] Response: {data}\n")
     except:
         print(f"[{step_name}] Response: {response.text}\n")
-    if response.status_code >= 400:
+    if response.status_code >= 400 or (
+        isinstance(data, dict)
+        and data.get("status") in {"GATEWAY_ERROR", "NACK"}
+    ):
         print(f"!!! Error in {step_name}. Halting flow.")
         exit(1)
 
@@ -91,7 +96,7 @@ time.sleep(5)
 print(">>> Step 4: Sending /cancel request...")
 cancel_payload = {
     "transaction_id": transaction_id,
-    "cancellation_reason_id": "001"
+    "cancellation_reason_id": "002"
 }
 res = requests.post(f"{BASE_URL}/cancel", json=cancel_payload)
 check_status(res, "CANCEL")

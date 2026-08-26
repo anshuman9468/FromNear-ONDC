@@ -100,7 +100,10 @@ class ONDCValidator:
                     errors.append(f"Invalid cancellation_reason_id: {cancellation_reason_id}. Allowed reasons: {sorted(list(allowed_reasons))}")
             
             # order / intent validation based on action
-            if action in ["select", "init", "confirm", "status", "track", "cancel", "update", "issue"]:
+            if action in ["status", "track", "cancel"]:
+                if not isinstance(message.get("order_id"), str) or not message["order_id"].strip():
+                    errors.append(f"Message must contain a non-empty 'order_id' for action {action}")
+            elif action in ["select", "init", "confirm", "update", "issue"]:
                 order_key = "issue" if action == "issue" else "order"
                 obj = message.get(order_key)
                 if not obj or not isinstance(obj, dict):

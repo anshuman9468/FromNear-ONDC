@@ -2,6 +2,7 @@ import requests
 import time
 import uuid
 import datetime
+import os
 from datetime import timezone
 
 # Configuration
@@ -10,7 +11,7 @@ BPP_ID = "workbench.ondc.tech"
 BPP_URI = "https://workbench.ondc.tech/api-service/ONDC:RET10/1.2.0/seller"
 
 # Generate new transaction ID
-transaction_id = str(uuid.uuid4())
+transaction_id = os.getenv("TRANSACTION_ID") or str(uuid.uuid4())
 print("==================================================")
 print("Starting Discovery Flow Incremental Catalog Refresh Pull")
 print(f"Transaction ID: {transaction_id}")
@@ -48,8 +49,8 @@ search_payload_1 = {
 res = requests.post(f"{BASE_URL}/search", json=search_payload_1)
 check_status(res, "SEARCH 1")
 
-print("Waiting 12 seconds for Step 2 on_search webhook to complete...")
-time.sleep(12)
+print("Waiting 18 seconds for Step 2 on_search webhook to complete...")
+time.sleep(18)
 
 # Step 3: Incremental Search Request (Catalog Refresh Pull with timestamp)
 print(">>> Step 3: Sending 2nd /search request for incremental catalog pull...")
@@ -61,7 +62,7 @@ search_payload_2 = {
     "transaction_id": transaction_id,
     "bpp_id": BPP_ID,
     "bpp_uri": BPP_URI,
-    "mode": "start",
+    "mode": "end",
     "start_time": start_time,
     "end_time": end_time
 }

@@ -20,7 +20,7 @@ class BppConfirmService:
 
         order_id = incoming_order.get("id") or lifecycle_tracker.get_order_id(transaction_id) or "2026-07-27-1001"
         created_at = incoming_order.get("created_at") or lifecycle_tracker.get_created_at(transaction_id) or _now()
-        updated_at = _now()
+        updated_at = incoming_order.get("updated_at") or _now()
 
         logger.info(f"[INBOUND REQ] action=confirm tx={transaction_id} msg_id={context.get('message_id')}")
 

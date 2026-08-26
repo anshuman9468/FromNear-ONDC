@@ -33,7 +33,7 @@ class BppStatusService:
             created_at=created_at,
             updated_at=updated_at,
             stored_order=stored_order,
-            order_state="Completed" if state_code in ("Order-delivered", "RTO-Delivered") else "In-Progress",
+            order_state="Completed" if state_code in ("Order-delivered", "RTO-Delivered") else "In-progress",
         )
 
         response_message = {"order": order_obj}

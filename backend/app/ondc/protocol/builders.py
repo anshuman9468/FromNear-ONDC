@@ -34,6 +34,184 @@ def get_item_count(qty_field: Any) -> int:
     return 1
 
 
+def _money(value: Any, default: str = "0.00") -> str:
+    """Return a non-empty decimal string, as required by RET10 price fields."""
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return default
+
+
+def _ret10_quote_tags(kind: str) -> List[Dict[str, Any]]:
+    return [{"code": "quote", "list": [{"code": "type", "value": kind}]}]
+
+
+def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
+    """Normalize the item shape reused by select, init, confirm, and update."""
+    normalized = dict(item) if isinstance(item, dict) else {}
+    normalized["id"] = str(normalized.get("id") or "I1")
+    normalized["location_id"] = str(normalized.get("location_id") or normalized.get("location") or "L1")
+    normalized["fulfillment_id"] = str(normalized.get("fulfillment_id") or fulfillment_id)
+    normalized["parent_item_id"] = str(normalized.get("parent_item_id") or "V1")
+    normalized["quantity"] = {"count": get_item_count(normalized.get("quantity"))}
+    if not isinstance(normalized.get("tags"), list) or not normalized["tags"]:
+        normalized["tags"] = [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
+    return normalized
+
+
+def _complete_bap_fulfillment(fulfillment: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
+    """Fill stable contact and location defaults before an outbound BAP request."""
+    normalized = dict(fulfillment) if isinstance(fulfillment, dict) else {}
+    normalized["id"] = str(normalized.get("id") or fulfillment_id)
+    normalized["type"] = normalized.get("type") or "Delivery"
+    normalized["tracking"] = normalized.get("tracking") if isinstance(normalized.get("tracking"), bool) else True
+
+    end = dict(normalized.get("end") or {})
+    contact = dict(end.get("contact") or {})
+    contact["phone"] = str(contact.get("phone") or "9876543210")
+    contact["email"] = str(contact.get("email") or "buyer@example.com")
+    contact["name"] = str(contact.get("name") or "Jane Doe")
+    end["contact"] = contact
+    person = dict(end.get("person") or {})
+    person["name"] = str(person.get("name") or contact["name"])
+    end["person"] = person
+    location = dict(end.get("location") or {})
+    location["id"] = str(location.get("id") or "L2")
+    location["gps"] = format_gps(location.get("gps") or "12.9716,77.5946")
+    descriptor = dict(location.get("descriptor") or {})
+    descriptor["name"] = str(descriptor.get("name") or "Buyer Delivery Location")
+    location["descriptor"] = descriptor
+    address = dict(location.get("address") or {})
+    address.update({
+        "name": str(address.get("name") or contact["name"]),
+        "building": str(address.get("building") or address.get("door") or "Apt 4B"),
+        "locality": str(address.get("locality") or address.get("street") or "MG Road"),
+        "city": str(address.get("city") or "Bengaluru"),
+        "state": str(address.get("state") or "Karnataka"),
+        "country": str(address.get("country") or "IND"),
+        "area_code": str(address.get("area_code") or "560001"),
+    })
+    location["address"] = address
+    end["location"] = location
+    normalized["end"] = end
+    normalized["tags"] = normalized.get("tags") if isinstance(normalized.get("tags"), list) else []
+    return normalized
+
+
+def _complete_quote(quote: Optional[Dict[str, Any]], items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build the quote shape Workbench validates on every confirm request."""
+    raw_quote = dict(quote) if isinstance(quote, dict) else {}
+    existing = raw_quote.get("breakup") if isinstance(raw_quote.get("breakup"), list) else []
+    entries_by_item = {
+        entry.get("@ondc/org/item_id"): entry
+        for entry in existing
+        if isinstance(entry, dict) and entry.get("@ondc/org/title_type") == "item"
+    }
+    delivery_entry = next(
+        (
+            entry for entry in existing
+            if isinstance(entry, dict) and entry.get("@ondc/org/title_type") == "delivery"
+        ),
+        {},
+    )
+
+    breakup: List[Dict[str, Any]] = []
+    total = 0.0
+    for source_item in items or [{"id": "I1", "quantity": {"count": 1}}]:
+        item_id = str(source_item.get("id") or "I1")
+        quantity = get_item_count(source_item.get("quantity"))
+        source = dict(entries_by_item.get(item_id) or {})
+        source_price = source.get("price") if isinstance(source.get("price"), dict) else {}
+        unit_price = _money(source_price.get("value", source_item.get("price", "250.00")), "250.00")
+        line_value = _money(float(unit_price) * quantity)
+        total += float(line_value)
+        item = dict(source.get("item") or {})
+        item["id"] = str(item.get("id") or item_id)
+        item["parent_item_id"] = str(item.get("parent_item_id") or source_item.get("parent_item_id") or "V1")
+        item["quantity"] = {
+            "available": {"count": str(item.get("quantity", {}).get("available", {}).get("count", "99"))},
+            "maximum": {"count": str(item.get("quantity", {}).get("maximum", {}).get("count", "5"))},
+            "selected": {"count": quantity},
+        }
+        item["price"] = {"currency": "INR", "value": unit_price}
+        item["tags"] = _ret10_quote_tags("item")
+        breakup.append({
+            "@ondc/org/item_id": item_id,
+            "@ondc/org/item_quantity": {"count": quantity},
+            "title": source.get("title") or item_id,
+            "@ondc/org/title_type": "item",
+            "price": {"currency": "INR", "value": line_value},
+            "item": item,
+        })
+
+    delivery_price = _money(
+        (delivery_entry.get("price") or {}).get("value") if isinstance(delivery_entry, dict) else None,
+        "50.00",
+    )
+    total += float(delivery_price)
+    delivery_item = dict((delivery_entry or {}).get("item") or {})
+    delivery_item["id"] = str(delivery_item.get("id") or "F1")
+    delivery_item["parent_item_id"] = str(delivery_item.get("parent_item_id") or "V1")
+    delivery_item["quantity"] = {
+        "available": {"count": str(delivery_item.get("quantity", {}).get("available", {}).get("count", "99"))},
+        "maximum": {"count": str(delivery_item.get("quantity", {}).get("maximum", {}).get("count", "5"))},
+        "selected": {"count": 1},
+    }
+    delivery_item["price"] = {"currency": "INR", "value": delivery_price}
+    delivery_item["tags"] = _ret10_quote_tags("fulfillment")
+    breakup.append({
+        "@ondc/org/item_id": "F1",
+        "@ondc/org/item_quantity": {"count": 1},
+        "title": (delivery_entry or {}).get("title") or "Delivery charges",
+        "@ondc/org/title_type": "delivery",
+        "price": {"currency": "INR", "value": delivery_price},
+        "item": delivery_item,
+    })
+    return {"price": {"currency": "INR", "value": _money(total)}, "breakup": breakup, "ttl": raw_quote.get("ttl") or "PT15M"}
+
+
+def _complete_settlements(payment: Optional[Dict[str, Any]], transaction_id: str, timestamp: str) -> Dict[str, Any]:
+    """Ensure settlement fields are present and typed before buyer sends confirm/update."""
+    result = dict(payment) if isinstance(payment, dict) else {}
+    source = result.get("@ondc/org/settlement_details")
+    source = source if isinstance(source, list) and source else [{}]
+    details = []
+    for entry in source:
+        settlement = dict(entry) if isinstance(entry, dict) else {}
+        settlement["settlement_counterparty"] = settlement.get("settlement_counterparty") or "seller-app"
+        settlement["settlement_phase"] = settlement.get("settlement_phase") or "sale-amount"
+        settlement["settlement_type"] = settlement.get("settlement_type") or "neft"
+        settlement["settlement_reference"] = settlement.get("settlement_reference") or transaction_id
+        settlement["settlement_timestamp"] = str(settlement.get("settlement_timestamp") or timestamp)
+        settlement["settlement_amount"] = _money(settlement.get("settlement_amount", result.get("params", {}).get("amount", "500.00")), "500.00")
+        settlement["subscriber_id"] = settlement.get("subscriber_id") or settings.ONDC_SUBSCRIBER_ID
+        settlement["beneficiary_name"] = settlement.get("beneficiary_name") or "FromNear Store"
+        settlement["bank_name"] = settlement.get("bank_name") or "Mock Bank"
+        settlement["branch_name"] = settlement.get("branch_name") or "MG Road"
+        settlement["settlement_bank_account_no"] = settlement.get("settlement_bank_account_no") or "1234567890"
+        settlement["settlement_ifsc_code"] = settlement.get("settlement_ifsc_code") or "MOCK0001234"
+        settlement["upi_address"] = settlement.get("upi_address") or "fromnear@upi"
+        settlement["settlement_status"] = settlement.get("settlement_status") or "PAID"
+        details.append(settlement)
+    result["@ondc/org/settlement_details"] = details
+    result["@ondc/org/settlement_basis"] = result.get("@ondc/org/settlement_basis") or "delivery"
+    result["@ondc/org/settlement_window"] = result.get("@ondc/org/settlement_window") or "PT1D"
+    result["@ondc/org/withholding_amount"] = result.get("@ondc/org/withholding_amount") or "0.0"
+    return result
+
+
+def _assert_no_null_values(value: Any, path: str = "payload") -> None:
+    """Prevent JSON null from reaching Workbench as an implicit undefined value."""
+    if value is None:
+        raise ValueError(f"Outbound ONDC payload contains null at {path}")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            _assert_no_null_values(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_no_null_values(child, f"{path}[{index}]")
+
+
 class BaseRequestBuilder:
     @staticmethod
     def generate_context(
@@ -69,7 +247,10 @@ class BaseRequestBuilder:
     def validate_and_return(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Enforces schema and structure compliance check before returning payload."""
         from app.ondc.protocol.validator import ONDCValidator
-        ONDCValidator.validate(payload)
+        _assert_no_null_values(payload)
+        valid, errors = ONDCValidator.validate(payload)
+        if not valid:
+            raise ValueError(f"Outbound ONDC payload failed validation: {errors}")
         return payload
 
 
@@ -147,17 +328,7 @@ class SelectRequestBuilder(BaseRequestBuilder):
         # items format: [{"id": "item_id", "quantity": 1}]
         ondc_items = []
         for it in items:
-            item_dict = {
-                "id": it["id"],
-                "quantity": {"count": get_item_count(it.get("quantity", 1))},
-                "location_id": "L1",
-                # parent_item_id and tags are MANDATORY per RET10 schema
-                "parent_item_id": it.get("parent_item_id") or "V1",
-                "tags": it.get("tags") if isinstance(it.get("tags"), list) and it.get("tags") else [
-                    {"code": "type", "list": [{"code": "type", "value": "item"}]}
-                ],
-            }
-            ondc_items.append(item_dict)
+            ondc_items.append(_complete_bap_item(it))
 
         return cls.validate_and_return({
             "context": context,
@@ -169,7 +340,7 @@ class SelectRequestBuilder(BaseRequestBuilder):
                     },
                     "items": ondc_items,
                     "fulfillments": [
-                        {
+                        _complete_bap_fulfillment({
                             # id is MANDATORY in select per RET10 schema
                             "id": "F1",
                             "type": "Delivery",
@@ -197,7 +368,7 @@ class SelectRequestBuilder(BaseRequestBuilder):
                                     }
                                 }
                             }
-                        }
+                        })
                     ]
                 }
             },
@@ -221,17 +392,7 @@ class InitRequestBuilder(BaseRequestBuilder):
         
         ondc_items = []
         for it in items:
-            item_dict = {
-                "id": it["id"],
-                "quantity": {"count": get_item_count(it.get("quantity", 1))},
-                "fulfillment_id": it.get("fulfillment_id", "F1"),
-                # parent_item_id and tags are MANDATORY per RET10 schema
-                "parent_item_id": it.get("parent_item_id") or "V1",
-                "tags": it.get("tags") if isinstance(it.get("tags"), list) and it.get("tags") else [
-                    {"code": "type", "list": [{"code": "type", "value": "item"}]}
-                ],
-            }
-            ondc_items.append(item_dict)
+            ondc_items.append(_complete_bap_item(it))
 
         return cls.validate_and_return({
             "context": context,
@@ -266,6 +427,7 @@ class InitRequestBuilder(BaseRequestBuilder):
                             "tracking": True,
                             "@ondc/org/TAT": "PT45M",
                             "@ondc/org/provider_name": "FromNear Store",
+                            "tags": [],
                             "end": {
                                 "contact": {
                                     "phone": shipping_address.get("phone", "") or "9876543210",
@@ -276,6 +438,8 @@ class InitRequestBuilder(BaseRequestBuilder):
                                     "name": shipping_address.get("name", "") or "Jane Doe"
                                 },
                                 "location": {
+                                    "id": "L2",
+                                    "descriptor": {"name": "Buyer Delivery Location"},
                                     "gps": format_gps("12.9716,77.5946"),
                                     "address": {
                                         "name": shipping_address.get("name", "") or "Jane Doe",
@@ -290,7 +454,7 @@ class InitRequestBuilder(BaseRequestBuilder):
                             }
                         }
                     ],
-                    "payment": {
+                    "payment": _complete_settlements({
                         "type": "ON-ORDER",
                         # collected_by MUST be "BPP" — must be consistent across INIT and CONFIRM
                         "collected_by": "BPP",
@@ -300,20 +464,7 @@ class InitRequestBuilder(BaseRequestBuilder):
                         "@ondc/org/settlement_basis": "delivery",
                         "@ondc/org/settlement_window": "PT1D",
                         "@ondc/org/withholding_amount": "0.0",
-                        "@ondc/org/settlement_details": [
-                            {
-                                "settlement_counterparty": "seller-app",
-                                "settlement_phase": "sale-amount",
-                                "settlement_type": "neft",
-                                "settlement_reference": transaction_id,
-                                "settlement_bank_account_no": "XXXXXXXXXX",
-                                "settlement_ifsc_code": "XXXXXXXXX",
-                                "beneficiary_name": "Test Name",
-                                "bank_name": "Test Bank",
-                                "branch_name": "Test Branch"
-                            }
-                        ]
-                    }
+                    }, transaction_id, context["timestamp"])
                 }
             },
         })
@@ -347,23 +498,12 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
         # Sanitize items - parent_item_id and tags are MANDATORY per RET10
         items_with_tags = []
         for it in (items or []):
-            it_copy = dict(it)
-            if "location_id" not in it_copy or not it_copy["location_id"]:
-                it_copy["location_id"] = "L1"
-            # Always ensure parent_item_id is a non-empty string
-            it_copy["parent_item_id"] = it_copy.get("parent_item_id") or "V1"
-            # Always ensure tags is a non-empty array
-            if not isinstance(it_copy.get("tags"), list) or not it_copy["tags"]:
-                it_copy["tags"] = [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
-
-            count_val = get_item_count(it_copy.get("quantity"))
-            it_copy["quantity"] = {"count": int(count_val)}
-            items_with_tags.append(it_copy)
+            items_with_tags.append(_complete_bap_item(it))
 
         # Sanitize fulfillments - ensure all mandatory RET10 fields are present
         fulfillments_with_tags = []
         for f in (fulfillments or []):
-            f_copy = dict(f)
+            f_copy = _complete_bap_fulfillment(f)
             # tracking is a mandatory boolean field
             if "tracking" not in f_copy:
                 f_copy["tracking"] = False
@@ -416,88 +556,15 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
                 start["location"] = start_loc
                 f_copy["start"] = start
 
-            if "tags" in f_copy:
-                if not f_copy["tags"]:
-                    f_copy.pop("tags")
             fulfillments_with_tags.append(f_copy)
 
-        # Sanitize quote
-        if quote and isinstance(quote.get("breakup"), list):
-            for entry in quote["breakup"]:
-                if not isinstance(entry, dict):
-                    continue
-                title_type = entry.get("@ondc/org/title_type")
-                item_id = entry.get("@ondc/org/item_id")
-                
-                if title_type == "item" or item_id:
-                    item_details = entry.get("item")
-                    if not isinstance(item_details, dict):
-                        item_details = {}
-                    
-                    if "id" not in item_details or not item_details["id"]:
-                        item_details["id"] = item_id or "I1"
-                    
-                    if "parent_item_id" in item_details:
-                        if not item_details["parent_item_id"]:
-                            item_details.pop("parent_item_id")
-                    
-                    if "price" not in item_details or not isinstance(item_details["price"], dict):
-                        entry_price = entry.get("price", {})
-                        item_details["price"] = {
-                            "currency": entry_price.get("currency") or "INR",
-                            "value": entry_price.get("value") or "0.0"
-                        }
-                    
-                    if "tags" in item_details:
-                        if not item_details["tags"]:
-                            item_details.pop("tags")
-                    
-                    entry["item"] = item_details
+        completed_quote = _complete_quote(quote, items_with_tags)
 
         # Sanitize payment
         pay_dict = dict(payment) if payment else {}
         payment_type = pay_dict.get("type") or "ON-ORDER"
         payment_status = "PAID" if payment_type == "ON-ORDER" else (pay_dict.get("status") or "NOT-PAID")
         
-        incoming_settlements = pay_dict.get("@ondc/org/settlement_details", [])
-        settlement_details = []
-        if incoming_settlements:
-            for sd in incoming_settlements:
-                sd_copy = dict(sd)
-                if "settlement_counterparty" not in sd_copy:
-                    sd_copy["settlement_counterparty"] = "seller-app"
-                if "settlement_phase" not in sd_copy:
-                    sd_copy["settlement_phase"] = "sale-amount"
-                if "settlement_type" not in sd_copy:
-                    sd_copy["settlement_type"] = "neft"
-                if "settlement_reference" not in sd_copy:
-                    sd_copy["settlement_reference"] = transaction_id
-                if "beneficiary_name" not in sd_copy:
-                    sd_copy["beneficiary_name"] = "FromNear Store"
-                if "bank_name" not in sd_copy:
-                    sd_copy["bank_name"] = "Mock Bank"
-                if "branch_name" not in sd_copy:
-                    sd_copy["branch_name"] = "MG Road"
-                if "settlement_bank_account_no" not in sd_copy:
-                    sd_copy["settlement_bank_account_no"] = "1234567890"
-                if "settlement_ifsc_code" not in sd_copy:
-                    sd_copy["settlement_ifsc_code"] = "MOCK0001234"
-                settlement_details.append(sd_copy)
-        else:
-            settlement_details = [
-                {
-                    "settlement_counterparty": "seller-app",
-                    "settlement_phase": "sale-amount",
-                    "settlement_type": "neft",
-                    "settlement_reference": transaction_id,
-                    "beneficiary_name": "FromNear Store",
-                    "bank_name": "Mock Bank",
-                    "branch_name": "MG Road",
-                    "settlement_bank_account_no": "1234567890",
-                    "settlement_ifsc_code": "MOCK0001234"
-                }
-            ]
-
         # Enforce all ONDC liability & dispute resolution terms
         BAP_TERMS_LIST = [
             {"code": "accept_bpp_terms", "value": "Y"},
@@ -519,6 +586,8 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
         if not has_bap_terms:
             sanitized_tags.append({"code": "bap_terms", "list": BAP_TERMS_LIST})
 
+        completed_payment = _complete_settlements(pay_dict, transaction_id, context["timestamp"])
+
         return cls.validate_and_return({
             "context": context,
             "message": {
@@ -536,7 +605,7 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
                     "billing": billing or {},
                     "fulfillments": fulfillments_with_tags,
                     "payment": {
-                        **pay_dict,
+                        **completed_payment,
                         "type": payment_type,
                         "status": payment_status,
                         "collected_by": pay_dict.get("collected_by", "BPP") if pay_dict else "BPP",
@@ -547,12 +616,12 @@ class ConfirmRequestBuilder(BaseRequestBuilder):
                             "transaction_id": transaction_id,
                         },
                         # @ondc/org/settlement_basis is MANDATORY per RET10 schema
-                        "@ondc/org/settlement_basis": pay_dict.get("@ondc/org/settlement_basis") or "delivery",
-                        "@ondc/org/settlement_window": pay_dict.get("@ondc/org/settlement_window") or "PT1D",
-                        "@ondc/org/withholding_amount": pay_dict.get("@ondc/org/withholding_amount") or "0.0",
-                        "@ondc/org/settlement_details": settlement_details
+                        "@ondc/org/settlement_basis": completed_payment["@ondc/org/settlement_basis"],
+                        "@ondc/org/settlement_window": completed_payment["@ondc/org/settlement_window"],
+                        "@ondc/org/withholding_amount": completed_payment["@ondc/org/withholding_amount"],
+                        "@ondc/org/settlement_details": completed_payment["@ondc/org/settlement_details"]
                     },
-                    "quote": quote or {},
+                    "quote": completed_quote,
                     "tags": sanitized_tags
                 }
             },
@@ -609,7 +678,7 @@ class CancelRequestBuilder(BaseRequestBuilder):
         bpp_id: str,
         bpp_uri: str,
         order_id: str,
-        cancellation_reason_id: str = "001",
+        cancellation_reason_id: str = "002",
     ) -> Dict[str, Any]:
         context = cls.generate_context("cancel", transaction_id, message_id, bpp_id, bpp_uri)
         return cls.validate_and_return({
@@ -653,7 +722,7 @@ class UpdateRequestBuilder(BaseRequestBuilder):
         order: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         context = cls.generate_context("update", transaction_id, message_id, bpp_id, bpp_uri)
-        msg_order = order or {"id": order_id}
+        msg_order = dict(order) if isinstance(order, dict) else {"id": order_id}
         if "id" not in msg_order:
             msg_order["id"] = order_id
         
@@ -661,23 +730,13 @@ class UpdateRequestBuilder(BaseRequestBuilder):
         if "items" in msg_order and isinstance(msg_order["items"], list):
             new_items = []
             for it in msg_order["items"]:
-                it_copy = dict(it)
-                if "parent_item_id" in it_copy:
-                    if not it_copy["parent_item_id"]:
-                        it_copy.pop("parent_item_id")
-                if "tags" in it_copy:
-                    if not it_copy["tags"]:
-                        it_copy.pop("tags")
-                
-                count_val = get_item_count(it_copy.get("quantity"))
-                it_copy["quantity"] = {"count": int(count_val)}
-                new_items.append(it_copy)
+                new_items.append(_complete_bap_item(it))
             msg_order["items"] = new_items
             
         if "fulfillments" in msg_order and isinstance(msg_order["fulfillments"], list):
             new_fulfillments = []
             for f in msg_order["fulfillments"]:
-                f_copy = dict(f)
+                f_copy = _complete_bap_fulfillment(f)
                 
                 # Ensure end is present and fully populated
                 end = dict(f_copy.get("end", {}))
@@ -721,11 +780,14 @@ class UpdateRequestBuilder(BaseRequestBuilder):
                     start["location"] = start_loc
                     f_copy["start"] = start
 
-                if "tags" in f_copy:
-                    if not f_copy["tags"]:
-                        f_copy.pop("tags")
+                f_copy["tags"] = f_copy.get("tags") if isinstance(f_copy.get("tags"), list) else []
                 new_fulfillments.append(f_copy)
             msg_order["fulfillments"] = new_fulfillments
+
+        if isinstance(msg_order.get("payment"), dict):
+            msg_order["payment"] = _complete_settlements(
+                msg_order["payment"], transaction_id, context["timestamp"]
+            )
 
         return cls.validate_and_return({
             "context": context,

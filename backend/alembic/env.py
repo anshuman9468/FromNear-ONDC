@@ -15,6 +15,7 @@ from app.models.user import User
 from app.models.search_cache import SearchCache
 from app.models.cart import Cart
 from app.models.order import Order, OrderItem, Address
+from app.models.accommodation import AccommodationLedgerEvent
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

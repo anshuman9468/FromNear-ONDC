@@ -5,6 +5,10 @@ from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_pay
 
 logger = logging.getLogger(__name__)
 
+VALID_CANCELLATION_REASON_IDS = {
+    "002", "021", "022", "023", "024", "051", "011", "013", "014", "016", "018", "052", "053",
+}
+
 
 class BppCancelService:
     async def process_cancel(self, payload: dict):
@@ -12,7 +16,9 @@ class BppCancelService:
             context = payload.get("context", {})
             message = payload.get("message", {})
             order_id = message.get("order_id", "2026-07-27-1001")
-            cancellation_reason_id = message.get("cancellation_reason_id", "001")
+            cancellation_reason_id = str(message.get("cancellation_reason_id") or "002")
+            if cancellation_reason_id not in VALID_CANCELLATION_REASON_IDS:
+                cancellation_reason_id = "002"
 
             await asyncio.sleep(1)
 

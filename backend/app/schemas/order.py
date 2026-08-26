@@ -78,7 +78,7 @@ class ConfirmRequestSchema(BaseModel):
 
 class CancelRequestSchema(BaseModel):
     transaction_id: str
-    cancellation_reason_id: Optional[str] = "001"
+    cancellation_reason_id: Optional[str] = "002"
 
 
 class SupportRequestSchema(BaseModel):

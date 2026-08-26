@@ -74,7 +74,31 @@ class Settings(BaseSettings):
     ONDC_ENC_PRIVATE_KEY: str = "MC4CAQAwBQYDK2VwBCIEINT3ZlYyE8tLgU7w1+J9wLzC2e+Y019V8B0V05YkR7m5"
     ONDC_ENC_PUBLIC_KEY: str = "MCowBQYDK2VwAyEAWIQTxIJjgQ+BHrEIwnEioCMxtXBLswKuUayrWP5e0xk="
 
+    # Optional seller/BPP keys. BAP/buyer calls keep using ONDC_SIGNING_*,
+    # while BPP callbacks can sign with seller-specific registry keys.
+    ONDC_BPP_SIGNING_PRIVATE_KEY: Optional[str] = None
+    ONDC_BPP_SIGNING_PUBLIC_KEY: Optional[str] = None
+    ONDC_BPP_ENC_PRIVATE_KEY: Optional[str] = None
+    ONDC_BPP_ENC_PUBLIC_KEY: Optional[str] = None
+    ONDC_BPP_UNIQUE_KEY_ID: Optional[str] = None
+    ONDC_BPP_FLOW_MODE: str = "auto"
+
     ONDC_VERIFY_SIGNATURES: bool = True
+
+    # Accommodation Booking Buyer (BAP) participant configuration.
+    # Register this subscriber_uri path in pre-production as the Subscriber URL
+    # relative to ACCOMMODATION_ONDC_SUBSCRIBER_ID.
+    ACCOMMODATION_ONDC_SUBSCRIBER_ID: str = "accommodation.fromnear.com"
+    ACCOMMODATION_ONDC_SUBSCRIBER_URI: str = "https://accommodation.fromnear.com/api/v1/accommodation/ondc"
+    ACCOMMODATION_ONDC_UNIQUE_KEY_ID: Optional[str] = None
+    ACCOMMODATION_ONDC_SIGNING_PRIVATE_KEY: Optional[str] = None
+    ACCOMMODATION_ONDC_SIGNING_PUBLIC_KEY: Optional[str] = None
+    ACCOMMODATION_ONDC_ENC_PRIVATE_KEY: Optional[str] = None
+    ACCOMMODATION_ONDC_ENC_PUBLIC_KEY: Optional[str] = None
+    ACCOMMODATION_ONDC_DOMAIN: str = "ONDC:TRV13"
+    ACCOMMODATION_ONDC_VERSION: str = "2.0.1"
+    ACCOMMODATION_ONDC_CITY: str = "std:080"
+    ACCOMMODATION_ONDC_VERIFY_SIGNATURES: bool = False
 
 
 
