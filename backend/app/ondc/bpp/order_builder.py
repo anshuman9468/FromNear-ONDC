@@ -45,8 +45,8 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # RET10 quote.breakup item tags use the item-tag vocabulary.
-        "code": "type",
+        # RET10 quote.breakup item tags are grouped under the quote code.
+        "code": "quote",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -54,9 +54,9 @@ DEFAULT_QUOTE_ITEM_TAGS = [
 ]
 DEFAULT_QUOTE_DELIVERY_TAGS = [
     {
-        "code": "type",
+        "code": "quote",
         "list": [
-            {"code": "type", "value": "item"},
+            {"code": "type", "value": "fulfillment"},
         ],
     }
 ]
@@ -81,11 +81,35 @@ def _normalize_fulfillment_tags(
             "list": [{"code": "reason_id", "value": "011"}],
         }]
 
+    # Do not carry an order_details tag into an update callback: RET10 uses
+    # action-specific update_state/cancel_request tags there.
+    if action == "on_update":
+        tags = [
+            tag for tag in tags
+            if tag.get("code") in {
+                "update_state", "cancel_request", "update_fulfillment_time",
+                "linked_order_diff", "quote_trail",
+            }
+        ]
+    else:
+        tags = [tag for tag in tags if tag.get("code") == "order_details"]
+
     if tags:
         return tags
 
+    # Standard order callbacks use order_details when no action-specific tag
+    # was supplied. Workbench rejects update_state on these callbacks.
+    if action != "on_update":
+        return [{
+            "code": "order_details",
+            "list": [
+                {"code": "order_id", "value": "2026-07-27-1001"},
+                {"code": "order_state", "value": state_code},
+            ],
+        }]
+
     # RET10 validates update_state as a timestamp tag group. This is also a
-    # safe non-empty fallback for status callbacks where no tag was supplied.
+    # safe non-empty fallback for update callbacks where no tag was supplied.
     if action == "on_update":
         return [{
             "code": "update_state",
@@ -737,15 +761,15 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
         else:
-            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
-            allowed_quote_type_values = {"item", "customization"}
+            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
+            allowed_quote_type_values = {"fulfillment", "order", "item"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "type":
+                if tag_code == "quote":
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)
