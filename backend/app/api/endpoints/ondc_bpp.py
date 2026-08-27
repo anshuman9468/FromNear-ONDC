@@ -30,6 +30,15 @@ def _bpp_lookup_keys():
     ]
 
 
+async def _run_bpp_handler_after_ack(action: str, payload: dict, handler_func):
+    """Run callback work after Workbench has recorded the inbound request."""
+    try:
+        await asyncio.sleep(1.0)
+        await handler_func(payload)
+    except Exception as e:
+        logger.error(f"Failed to process {action} payload after ACK: {str(e)}", exc_info=True)
+
+
 async def process_incoming_bpp_request(request: Request, action: str, handler_func):
     """Generic helper to parse, validate, and dispatch incoming ONDC BPP requests."""
     body_bytes = await request.body()
@@ -84,21 +93,10 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
         f"Caller: Workbench/BAP\n"
     )
 
-    # Cloud Run may stop an instance immediately after the response is sent.
-    # Await lifecycle work so unsolicited callbacks are not lost mid-flow.
-    try:
-        await asyncio.sleep(1.0)
-        await handler_func(payload)
-    except Exception as e:
-        logger.error(f"Failed to process {action} payload: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "context": context,
-                "message": {"ack": {"status": "NACK"}},
-                "error": {"code": "10004", "message": "BPP lifecycle processing failed"},
-            },
-        )
+    # Return the ACK before emitting the callback so Workbench records the
+    # inbound request first. Cloud Run is deployed with CPU always allocated,
+    # so this task remains live after the HTTP response is sent.
+    asyncio.create_task(_run_bpp_handler_after_ack(action, payload, handler_func))
 
     return {"context": context, "message": {"ack": {"status": "ACK"}}}
 
