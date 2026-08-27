@@ -112,12 +112,15 @@ def _normalize_fulfillment_tags(
             ],
         }]
 
-    # RET10 validates update_state as a timestamp tag group. This is also a
-    # safe non-empty fallback for update callbacks where no tag was supplied.
+    # RET10 validates update_state with the lifecycle state and reason id.
+    # A timestamp is not a valid child code for this tag group.
     if action == "on_update":
         return [{
             "code": "update_state",
-            "list": [{"code": "timestamp", "value": timestamp}],
+            "list": [
+                {"code": "state", "value": state_code},
+                {"code": "reason_id", "value": "011"},
+            ],
         }]
 
     if state_code.startswith("Return") or state_code == "Liquidated":
