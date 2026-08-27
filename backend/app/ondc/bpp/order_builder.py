@@ -45,9 +45,9 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # Pramaan validates breakup item tags with the catalog-item vocabulary.
-        # Quote pricing data belongs on the breakup entry, not in item.tags.
-        "code": "type",
+        # The live RET10 BPP validator uses a quote-specific item tag
+        # vocabulary for quote.breakup entries.
+        "code": "quote",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -55,11 +55,9 @@ DEFAULT_QUOTE_ITEM_TAGS = [
 ]
 DEFAULT_QUOTE_DELIVERY_TAGS = [
     {
-        # The breakup item still needs a valid item tag array. "fulfillment"
-        # is not accepted by RET10 here, even for a delivery charge row.
-        "code": "type",
+        "code": "quote",
         "list": [
-            {"code": "type", "value": "item"},
+            {"code": "type", "value": "fulfillment"},
         ],
     }
 ]
@@ -786,15 +784,15 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
         else:
-            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
-            allowed_quote_type_values = {"item", "customization"}
+            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
+            allowed_quote_type_values = {"fulfillment", "order", "item"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "type":
+                if tag_code == "quote":
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)
