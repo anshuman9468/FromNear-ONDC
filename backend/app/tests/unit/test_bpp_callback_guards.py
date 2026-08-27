@@ -4,6 +4,7 @@ from app.main import app
 from app.ondc.bpp.client import BppNetworkClient
 from app.ondc.bpp.order_builder import build_canonical_order, build_canonical_quote, validate_ret10_payload
 from app.ondc.bpp.services.search import _normalize_catalog_quantities
+from app.ondc.bpp.state_machine import LifecycleTracker
 
 
 CONTEXT = {
@@ -123,3 +124,9 @@ def test_bpp_lookup_aliases_return_protocol_key_arrays():
             assert isinstance(response.json(), list)
             assert response.json()[0]["signing_public_key"]
             assert response.json()[0]["encr_public_key"]
+
+
+def test_cancel_marks_lifecycle_as_cancelled_before_task_cancellation():
+    tracker = LifecycleTracker()
+    tracker.cancel_lifecycle_task("tx-cancel")
+    assert tracker.is_cancelled("tx-cancel") is True

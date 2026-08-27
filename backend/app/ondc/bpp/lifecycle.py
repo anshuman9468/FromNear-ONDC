@@ -108,6 +108,8 @@ async def push_post_confirm_lifecycle(
     transaction_id = context.get("transaction_id", "default_tx")
 
     if is_rto_flow(context, payload):
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
         update_order = build_canonical_order(
             action="on_update",
             payload=payload,
@@ -125,6 +127,8 @@ async def push_post_confirm_lifecycle(
     if is_prepaid_track_flow(transaction_id):
         for state_code in PREPAID_PRE_TRACK_STATUS_SEQUENCE:
             await asyncio.sleep(0.5)
+            if lifecycle_tracker.is_cancelled(transaction_id):
+                return
             status_order = build_canonical_order(
                 action="on_status",
                 payload=payload,
@@ -160,6 +164,8 @@ async def push_post_confirm_lifecycle(
     # Workbench return flows expect the full delivery status progression before update.
     for state_code in PREPAID_STATUS_SEQUENCE:
         await asyncio.sleep(0.5)
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
         status_order = build_canonical_order(
             action="on_status",
             payload=payload,
@@ -185,6 +191,8 @@ async def push_rto_post_update_statuses(
     transaction_id = context.get("transaction_id", "default_tx")
     for state_code in RTO_STATUS_SEQUENCE:
         await asyncio.sleep(0.5)
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
         status_order = build_canonical_order(
             action="on_status",
             payload=payload,
@@ -242,6 +250,8 @@ async def push_prepaid_post_track_statuses(
     transaction_id = context.get("transaction_id", "default_tx")
     for state_code in PREPAID_POST_TRACK_STATUS_SEQUENCE:
         await asyncio.sleep(0.5)
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
         status_order = build_canonical_order(
             action="on_status",
             payload=payload,
