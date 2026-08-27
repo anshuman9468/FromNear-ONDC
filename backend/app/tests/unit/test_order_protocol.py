@@ -19,21 +19,35 @@ from app.ondc.protocol.parsers import (
 )
 
 
-def test_select_request_builder():
+def test_select_request_builder_normalizes_workbench_items():
     payload = SelectRequestBuilder.build(
         transaction_id="tx-123",
         message_id="msg-123",
         bpp_id="bpp-1",
         bpp_uri="https://bpp-1.com",
         provider_id="provider-1",
-        items=[{"id": "item-1", "quantity": 2}],
+        # This is the legacy shape emitted by the Workbench input form.
+        items=[
+            {"id": "I1", "location": "L1", "quantity": 2},
+            {"id": "I2", "location": "L1", "quantity": {"count": 1}},
+        ],
     )
     assert payload["context"]["action"] == "select"
     assert payload["context"]["transaction_id"] == "tx-123"
     assert payload["context"]["bpp_id"] == "bpp-1"
     assert payload["message"]["order"]["provider"]["id"] == "provider-1"
-    assert payload["message"]["order"]["items"][0]["id"] == "item-1"
-    assert payload["message"]["order"]["items"][0]["quantity"]["count"] == 2
+    for expected_id, expected_count, item in zip(
+        ("I1", "I2"),
+        (2, 1),
+        payload["message"]["order"]["items"],
+    ):
+        assert item["id"] == expected_id
+        assert item["location_id"] == "L1"
+        assert "location" not in item
+        assert item["fulfillment_id"] == "F1"
+        assert item["parent_item_id"] == "V1"
+        assert item["quantity"] == {"count": expected_count}
+        assert item["tags"] == [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
 
 
 def test_init_request_builder():
@@ -63,13 +77,21 @@ def test_confirm_request_builder():
         bpp_id="bpp-1",
         bpp_uri="https://bpp-1.com",
         provider_id="provider-1",
-        items=[{"id": "item-1", "quantity": 2}],
+        items=[
+            {"id": "I1", "location": "L1", "quantity": 2},
+            {"id": "I2", "location": "L1", "quantity": 1},
+        ],
         billing_address=billing,
         shipping_address=shipping,
         amount=450.0,
     )
     assert payload["context"]["action"] == "confirm"
     assert payload["message"]["order"]["payment"]["params"]["amount"] == "450.0"
+    for item in payload["message"]["order"]["items"]:
+        assert item["location_id"] == "L1"
+        assert "location" not in item
+        assert item["parent_item_id"] == "V1"
+        assert item["tags"]
 
 
 def test_status_request_builder():

@@ -51,6 +51,9 @@ def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict
     normalized = dict(item) if isinstance(item, dict) else {}
     normalized["id"] = str(normalized.get("id") or "I1")
     normalized["location_id"] = str(normalized.get("location_id") or normalized.get("location") or "L1")
+    # RET10 request items use location_id. Do not forward the legacy location
+    # field because Workbench validates the canonical representation.
+    normalized.pop("location", None)
     normalized["fulfillment_id"] = str(normalized.get("fulfillment_id") or fulfillment_id)
     normalized["parent_item_id"] = str(normalized.get("parent_item_id") or "V1")
     normalized["quantity"] = {"count": get_item_count(normalized.get("quantity"))}
