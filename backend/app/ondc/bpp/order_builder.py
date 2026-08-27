@@ -115,10 +115,18 @@ def _normalize_fulfillment_tags(
     # RET10 validates update_state with the lifecycle state and reason id.
     # A timestamp is not a valid child code for this tag group.
     if action == "on_update":
+        # Workbench RET10 restricts update_state.state to the two wire-level
+        # fulfillment states below. Internal return/RTO states are mapped to
+        # the closest valid state before the callback is serialized.
+        update_state = (
+            "Order-delivered"
+            if state_code in {"Return-Delivered", "RTO-Delivered", "Cancelled"}
+            else "Order-picked-up"
+        )
         return [{
             "code": "update_state",
             "list": [
-                {"code": "state", "value": state_code},
+                {"code": "state", "value": update_state},
                 {"code": "reason_id", "value": "011"},
             ],
         }]
