@@ -45,9 +45,9 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # quote.breakup[].item is an Item object, so use the Item tag
-        # vocabulary rather than the quote-level extension vocabulary.
-        "code": "type",
+        # RET10 quote.breakup item tags use the quote extension code. The
+        # nested type value identifies the breakup scope.
+        "code": "quote",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -55,7 +55,7 @@ DEFAULT_QUOTE_ITEM_TAGS = [
 ]
 DEFAULT_QUOTE_DELIVERY_TAGS = [
     {
-        "code": "type",
+        "code": "quote",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -782,8 +782,11 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
         else:
-            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
-            allowed_quote_type_values = {"item", "customization"}
+            # RET10 1.2.0 validates quote.breakup[].item.tags separately
+            # from order.items[].tags. The quote extension is the only
+            # portable way to identify the breakup scope here.
+            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
+            allowed_quote_type_values = {"fulfillment", "order", "item"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
