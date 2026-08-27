@@ -66,6 +66,29 @@ def _complete_bap_fulfillment(fulfillment: Dict[str, Any], fulfillment_id: str =
     normalized["type"] = normalized.get("type") or "Delivery"
     normalized["tracking"] = normalized.get("tracking") if isinstance(normalized.get("tracking"), bool) else True
 
+    start = dict(normalized.get("start") or {})
+    start_location = dict(start.get("location") or {})
+    start_location["id"] = str(start_location.get("id") or "L1")
+    start_location["gps"] = format_gps(start_location.get("gps") or "12.9716,77.5946")
+    start_descriptor = dict(start_location.get("descriptor") or {})
+    start_descriptor["name"] = str(start_descriptor.get("name") or "FromNear Main Branch")
+    start_location["descriptor"] = start_descriptor
+    start_address = dict(start_location.get("address") or {})
+    start_address.update({
+        "locality": str(start_address.get("locality") or "MG Road"),
+        "city": str(start_address.get("city") or "Bengaluru"),
+        "state": str(start_address.get("state") or "Karnataka"),
+        "country": str(start_address.get("country") or "IND"),
+        "area_code": str(start_address.get("area_code") or "560001"),
+    })
+    start_location["address"] = start_address
+    start["location"] = start_location
+    start_contact = dict(start.get("contact") or {})
+    start_contact["phone"] = str(start_contact.get("phone") or "9876543210")
+    start_contact["email"] = str(start_contact.get("email") or "support@fromnear.com")
+    start["contact"] = start_contact
+    normalized["start"] = start
+
     end = dict(normalized.get("end") or {})
     contact = dict(end.get("contact") or {})
     contact["phone"] = str(contact.get("phone") or "9876543210")
@@ -94,7 +117,11 @@ def _complete_bap_fulfillment(fulfillment: Dict[str, Any], fulfillment_id: str =
     location["address"] = address
     end["location"] = location
     normalized["end"] = end
-    normalized["tags"] = normalized.get("tags") if isinstance(normalized.get("tags"), list) else []
+    normalized["tags"] = (
+        normalized.get("tags")
+        if isinstance(normalized.get("tags"), list) and normalized.get("tags")
+        else [{"code": "order_details", "list": [{"code": "weight_unit", "value": "kilogram"}]}]
+    )
     return normalized
 
 

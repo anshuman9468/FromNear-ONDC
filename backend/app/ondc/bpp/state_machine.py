@@ -17,6 +17,7 @@ class LifecycleTracker:
                 "status_call_count": 0,
                 "update_call_count": 0,
                 "select_call_count": 0,
+                "out_of_stock_flow": False,
                 "sent_callbacks": set(),
                 "stored_order": None,
                 "stored_context": None,
@@ -64,6 +65,12 @@ class LifecycleTracker:
 
     def get_select_count(self, transaction_id: str) -> int:
         return self.get_or_create(transaction_id).get("select_call_count", 0)
+
+    def mark_out_of_stock_flow(self, transaction_id: str) -> None:
+        self.get_or_create(transaction_id)["out_of_stock_flow"] = True
+
+    def is_out_of_stock_flow(self, transaction_id: str) -> bool:
+        return bool(self.get_or_create(transaction_id).get("out_of_stock_flow"))
 
     def advance_status_state(self, transaction_id: str, requested_state: Optional[str] = None) -> str:
         session = self.get_or_create(transaction_id)

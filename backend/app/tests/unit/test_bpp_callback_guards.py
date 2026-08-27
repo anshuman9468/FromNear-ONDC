@@ -88,15 +88,15 @@ def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_locatio
     assert isinstance(item["tags"], list)
 
 
-def test_quote_breakup_items_use_live_ret10_quote_tag_vocabulary():
+def test_quote_breakup_items_use_ret10_item_tag_vocabulary():
     quote = build_canonical_quote([{"id": "I1", "quantity": {"count": 1}}])
     for breakup in quote["breakup"]:
         item = breakup["item"]
         assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
         assert isinstance(item["tags"], list) and item["tags"]
-        assert item["tags"][0]["code"] == "quote"
+        assert item["tags"][0]["code"] == "type"
         assert item["tags"][0]["list"][0]["code"] == "type"
-        assert item["tags"][0]["list"][0]["value"] in {"item", "fulfillment"}
+        assert item["tags"][0]["list"][0]["value"] in {"item", "customization"}
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():

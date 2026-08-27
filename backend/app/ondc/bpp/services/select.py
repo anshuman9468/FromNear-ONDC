@@ -19,12 +19,13 @@ class BppSelectService:
         order_obj = build_canonical_order(
             action="on_select",
             payload=payload,
-            state_code="Non-serviceable" if is_out_of_stock_flow() and select_count >= 2 else "Serviceable",
+            state_code="Non-serviceable" if is_out_of_stock_flow(transaction_id) and select_count >= 2 else "Serviceable",
         )
 
         # Out-of-stock flow: Workbench's second select expects an ONDC domain
         # error at callback root, not an invalid message.order.error field.
-        if is_out_of_stock_flow() and select_count >= 2:
+        if select_count >= 2:
+            lifecycle_tracker.mark_out_of_stock_flow(transaction_id)
             for item in order_obj.get("items", []):
                 item.get("quantity", {}).setdefault("selected", {})["count"] = 0
 

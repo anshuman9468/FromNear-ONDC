@@ -45,9 +45,9 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # The live RET10 BPP validator uses a quote-specific item tag
-        # vocabulary for quote.breakup entries.
-        "code": "quote",
+        # quote.breakup[].item is an Item object, so use the Item tag
+        # vocabulary rather than the quote-level extension vocabulary.
+        "code": "type",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -55,9 +55,9 @@ DEFAULT_QUOTE_ITEM_TAGS = [
 ]
 DEFAULT_QUOTE_DELIVERY_TAGS = [
     {
-        "code": "quote",
+        "code": "type",
         "list": [
-            {"code": "type", "value": "fulfillment"},
+            {"code": "type", "value": "item"},
         ],
     }
 ]
@@ -220,19 +220,17 @@ def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Di
     item_obj: Dict[str, Any] = {
         "id": item_id,
         "fulfillment_id": it.get("fulfillment_id") or (catalog_item or {}).get("fulfillment_id") or "F1",
+        "location_id": (
+            it.get("location_id")
+            or it.get("location")
+            or (catalog_item or {}).get("location_id")
+            or "L1"
+        ),
         # parent_item_id is MANDATORY in all BPP responses per RET10 schema
         "parent_item_id": _resolve_parent_item_id(catalog_item, it.get("parent_item_id")),
         "tags": _resolve_item_tags(catalog_item, it.get("tags")),
     }
     if action == "on_select":
-        # Older Workbench form payloads use `location`; RET10 callbacks must
-        # always serialize the canonical `location_id` field.
-        item_obj["location_id"] = (
-            it.get("location_id")
-            or it.get("location")
-            or (catalog_item or {}).get("location_id")
-            or "L1"
-        )
         item_obj["quantity"] = {"selected": {"count": int(qty)}}
     else:
         item_obj["quantity"] = {"count": int(qty)}
@@ -784,8 +782,8 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
         else:
-            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
-            allowed_quote_type_values = {"fulfillment", "order", "item"}
+            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
+            allowed_quote_type_values = {"item", "customization"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:

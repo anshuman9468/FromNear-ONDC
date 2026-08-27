@@ -30,7 +30,7 @@ class BppTrackService:
         await bpp_client.send_callback(context, "on_track", response_message)
         lifecycle_tracker.record_callback(transaction_id, "on_track", "active")
 
-        if is_prepaid_track_flow():
+        if is_prepaid_track_flow(transaction_id):
             await push_prepaid_post_track_statuses(
                 context=context,
                 payload=payload,

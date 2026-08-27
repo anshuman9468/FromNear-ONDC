@@ -137,7 +137,7 @@ class UpdateService:
                             {"code": "id", "value": fulfillment_id_val},
                             {"code": "item_id", "value": "I1"},
                             {"code": "item_quantity", "value": "1"},
-                            {"code": "reason_id", "value": "001"},
+                            {"code": "reason_id", "value": "002"},
                             {"code": "reason_desc", "value": "detailed description"},
                             {"code": "images", "value": "https://ondc.fromnear.com/proof.jpg"},
                             {"code": "ttl_approval", "value": "PT24H"},
@@ -159,12 +159,24 @@ class UpdateService:
                     seen_items.add(item_id)
                     item_copy = dict(item)
                     item_copy["quantity"] = {"count": 1}
+                    item_copy["location_id"] = str(item_copy.get("location_id") or item_copy.get("location") or "L1")
+                    item_copy.pop("location", None)
                     item_copy["parent_item_id"] = str(item_copy.get("parent_item_id") or "V1")
-                    item_copy["tags"] = item_copy.get("tags") if isinstance(item_copy.get("tags"), list) else []
+                    item_copy["tags"] = (
+                        item_copy.get("tags")
+                        if isinstance(item_copy.get("tags"), list) and item_copy.get("tags")
+                        else [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
+                    )
                     item_copy.pop("fulfillment_id", None)
                     cleaned_items.append(item_copy)
         if not cleaned_items:
-            cleaned_items = [{"id": "I1", "quantity": {"count": 1}, "parent_item_id": "V1", "tags": []}]
+            cleaned_items = [{
+                "id": "I1",
+                "location_id": "L1",
+                "quantity": {"count": 1},
+                "parent_item_id": "V1",
+                "tags": [{"code": "type", "list": [{"code": "type", "value": "item"}]}],
+            }]
 
         order_payload = custom_order or {
             "id": order.order_id,

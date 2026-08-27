@@ -60,12 +60,17 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
     return "rto" in haystack or "merchant" in haystack
 
 
-def is_prepaid_track_flow() -> bool:
-    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {"prepaid_track", "track", "out_of_stock"}
+def is_prepaid_track_flow(transaction_id: str | None = None) -> bool:
+    mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
+    return mode in {"prepaid_track", "track", "out_of_stock"} or (
+        transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+    )
 
 
-def is_out_of_stock_flow() -> bool:
-    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {"out_of_stock", "oos"}
+def is_out_of_stock_flow(transaction_id: str | None = None) -> bool:
+    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {"out_of_stock", "oos"} or (
+        transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+    )
 
 
 async def _send_lifecycle_callback(
@@ -117,7 +122,7 @@ async def push_post_confirm_lifecycle(
         lifecycle_tracker.record_callback(transaction_id, "on_update", RET10_FULFILLMENT_STATE["PACKED"])
         return
 
-    if is_prepaid_track_flow():
+    if is_prepaid_track_flow(transaction_id):
         for state_code in PREPAID_PRE_TRACK_STATUS_SEQUENCE:
             await asyncio.sleep(0.5)
             status_order = build_canonical_order(
