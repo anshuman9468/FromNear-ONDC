@@ -103,8 +103,12 @@ def _normalize_fulfillment_tags(
         return [{
             "code": "order_details",
             "list": [
-                {"code": "order_id", "value": "2026-07-27-1001"},
-                {"code": "order_state", "value": state_code},
+                {"code": "weight_unit", "value": "kilogram"},
+                {"code": "weight_value", "value": "5"},
+                {"code": "dim_unit", "value": "centimeter"},
+                {"code": "length", "value": "30"},
+                {"code": "breadth", "value": "20"},
+                {"code": "height", "value": "10"},
             ],
         }]
 
