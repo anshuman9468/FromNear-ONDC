@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.ondc.bpp.client import BppNetworkClient
-from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload
+from app.ondc.bpp.order_builder import build_canonical_order, build_canonical_quote, validate_ret10_payload
 from app.ondc.bpp.services.search import _normalize_catalog_quantities
 
 
@@ -65,6 +65,37 @@ def test_catalog_normalizer_supplies_bpp_descriptor_and_food_statutory_data():
     assert isinstance(descriptor["images"], list)
     statutory = catalog["bpp/providers"][0]["items"][0]["@ondc/org/statutory_reqs_prepackaged_food"]
     assert all(isinstance(value, str) and value for value in statutory.values())
+
+
+def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_location():
+    catalog = _normalize_catalog_quantities(
+        {
+            "bpp/providers": [
+                {
+                    "id": "P1",
+                    "locations": [{"id": "L1"}],
+                    "items": [{"id": "I1", "location": "L1", "descriptor": {"name": "Rice"}}],
+                }
+            ]
+        }
+    )
+
+    item = catalog["bpp/providers"][0]["items"][0]
+    assert item["location_id"] == "L1"
+    assert "location" not in item
+    assert item["parent_item_id"] == "V1"
+    assert item["fulfillment_id"] == "F1"
+    assert isinstance(item["tags"], list)
+
+
+def test_quote_breakup_items_use_pramaan_item_tag_vocabulary():
+    quote = build_canonical_quote([{"id": "I1", "quantity": {"count": 1}}])
+    for breakup in quote["breakup"]:
+        item = breakup["item"]
+        assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
+        assert isinstance(item["tags"], list) and item["tags"]
+        assert item["tags"][0]["code"] == "type"
+        assert item["tags"][0]["list"][0] == {"code": "type", "value": "item"}
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():

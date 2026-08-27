@@ -45,8 +45,9 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # RET10 quote.breakup item tags are grouped under the quote code.
-        "code": "quote",
+        # Pramaan validates breakup item tags with the catalog-item vocabulary.
+        # Quote pricing data belongs on the breakup entry, not in item.tags.
+        "code": "type",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -54,9 +55,11 @@ DEFAULT_QUOTE_ITEM_TAGS = [
 ]
 DEFAULT_QUOTE_DELIVERY_TAGS = [
     {
-        "code": "quote",
+        # The breakup item still needs a valid item tag array. "fulfillment"
+        # is not accepted by RET10 here, even for a delivery charge row.
+        "code": "type",
         "list": [
-            {"code": "type", "value": "fulfillment"},
+            {"code": "type", "value": "item"},
         ],
     }
 ]
@@ -224,7 +227,14 @@ def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Di
         "tags": _resolve_item_tags(catalog_item, it.get("tags")),
     }
     if action == "on_select":
-        item_obj["location_id"] = it.get("location_id") or (catalog_item or {}).get("location_id") or "L1"
+        # Older Workbench form payloads use `location`; RET10 callbacks must
+        # always serialize the canonical `location_id` field.
+        item_obj["location_id"] = (
+            it.get("location_id")
+            or it.get("location")
+            or (catalog_item or {}).get("location_id")
+            or "L1"
+        )
         item_obj["quantity"] = {"selected": {"count": int(qty)}}
     else:
         item_obj["quantity"] = {"count": int(qty)}
@@ -776,15 +786,15 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
         else:
-            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
-            allowed_quote_type_values = {"fulfillment", "order", "item"}
+            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
+            allowed_quote_type_values = {"item", "customization"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "quote":
+                if tag_code == "type":
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)

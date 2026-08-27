@@ -206,6 +206,16 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
             if not isinstance(parent_id, str) or not parent_id.strip():
                 item["parent_item_id"] = "V1"
 
+            # RET10 catalog and callback payloads use location_id. Accept the
+            # legacy input alias but never emit it, otherwise Workbench builds
+            # select/init/confirm requests with an invalid `location` field.
+            location_id = item.get("location_id") or item.get("location") or "L1"
+            item["location_id"] = str(location_id)
+            item.pop("location", None)
+
+            fulfillment_id = item.get("fulfillment_id") or "F1"
+            item["fulfillment_id"] = str(fulfillment_id)
+
             item["tags"] = [
                 tag for tag in item.get("tags", [])
                 if isinstance(tag, dict) and tag.get("code") in ALLOWED_ITEM_TAG_CODES
