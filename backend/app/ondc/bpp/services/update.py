@@ -25,12 +25,37 @@ class BppUpdateService:
         logger.info(f"[INBOUND REQ] action=update tx={transaction_id} msg_id={context.get('message_id')}")
 
         if is_rto_flow(context, payload):
+            # /update has a paired direct on_update callback. Do not start
+            # unsolicited RTO statuses before Workbench records it.
+            order_obj = build_canonical_order(
+                action="on_update",
+                payload=payload,
+                state_code="Return-Initiated",
+                order_id=order_id,
+                created_at=created_at,
+                updated_at=updated_at,
+                stored_order=stored_order,
+                order_state="In-progress",
+            )
+            response_message = {"order": order_obj}
+            response_payload = {
+                "context": bpp_client._create_response_context(context, "on_update"),
+                "message": response_message,
+            }
+            errors = validate_ret10_payload("on_update", response_payload)
+            if errors:
+                logger.error(f"RET10 Validation Failed for RTO on_update: {errors}")
+                raise ValueError(f"RET10 Schema Error: {errors}")
+
+            lifecycle_tracker.store_order(transaction_id, order_obj, context, created_at, order_id)
+            await bpp_client.send_callback(context, "on_update", response_message)
+            lifecycle_tracker.record_callback(transaction_id, "on_update", "Return-Initiated")
             await push_rto_post_update_statuses(
                 context=context,
                 payload=payload,
                 order_id=order_id,
                 created_at=created_at,
-                stored_order=stored_order or incoming_order,
+                stored_order=order_obj,
             )
             return
 
@@ -96,6 +121,31 @@ class BppUpdateService:
                 lifecycle_tracker.store_order(transaction_id, followup_order, context, created_at, order_id)
                 await bpp_client.send_unsolicited(context, "on_update", {"order": followup_order})
                 lifecycle_tracker.record_callback(transaction_id, "on_update", followup_state)
+        else:
+            # The second update completes the return and is followed by the
+            # unsolicited callback represented by the final Workbench step.
+            await asyncio.sleep(0.5)
+            final_order = build_canonical_order(
+                action="on_update",
+                payload=payload,
+                state_code="Return-Delivered",
+                order_id=order_id,
+                created_at=created_at,
+                updated_at=_now(),
+                stored_order=order_obj,
+                order_state="Completed",
+            )
+            final_payload = {
+                "context": bpp_client._create_unsolicited_context(context, "on_update"),
+                "message": {"order": final_order},
+            }
+            final_errors = validate_ret10_payload("on_update", final_payload)
+            if final_errors:
+                logger.error(f"RET10 Validation Failed for final unsolicited on_update: {final_errors}")
+                raise ValueError(f"RET10 Schema Error: {final_errors}")
+            lifecycle_tracker.store_order(transaction_id, final_order, context, created_at, order_id)
+            await bpp_client.send_unsolicited(context, "on_update", {"order": final_order})
+            lifecycle_tracker.record_callback(transaction_id, "on_update", "Return-Delivered")
 
     async def handle_update(self, payload: dict):
         await self.process_update(payload)

@@ -45,9 +45,9 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # RET10 quote.breakup item tags use the quote extension code. The
-        # nested type value identifies the breakup scope.
-        "code": "quote",
+        # quote.breakup[].item is an Item object. Workbench validates its
+        # tags against the standard item-tag vocabulary, not quote tags.
+        "code": "type",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -55,9 +55,9 @@ DEFAULT_QUOTE_ITEM_TAGS = [
 ]
 DEFAULT_QUOTE_DELIVERY_TAGS = [
     {
-        "code": "quote",
+        "code": "type",
         "list": [
-            {"code": "type", "value": "item"},
+            {"code": "type", "value": "fulfillment"},
         ],
     }
 ]
@@ -782,18 +782,15 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item missing tags array")
         else:
-            # RET10 1.2.0 validates quote.breakup[].item.tags separately
-            # from order.items[].tags. The quote extension is the only
-            # portable way to identify the breakup scope here.
-            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
-            allowed_quote_type_values = {"fulfillment", "order", "item"}
+            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
+            allowed_quote_type_values = {"item", "customization", "fulfillment"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "quote":
+                if tag_code == "type":
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)
