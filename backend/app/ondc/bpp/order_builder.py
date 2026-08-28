@@ -45,19 +45,9 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        # quote.breakup[].item is an Item object. Workbench validates its
-        # tags against the standard item-tag vocabulary, not quote tags.
         "code": "type",
         "list": [
             {"code": "type", "value": "item"},
-        ],
-    }
-]
-DEFAULT_QUOTE_DELIVERY_TAGS = [
-    {
-        "code": "type",
-        "list": [
-            {"code": "type", "value": "fulfillment"},
         ],
     }
 ]
@@ -272,8 +262,7 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         "@ondc/org/title_type": "delivery",
         "price": {"currency": "INR", "value": f"{delivery_charge:.2f}"},
         "item": {
-            **_build_quote_item_details("F1", None, delivery_charge),
-            "tags": DEFAULT_QUOTE_DELIVERY_TAGS,
+            "id": "F1"
         }
     })
 
@@ -442,7 +431,7 @@ def build_canonical_billing(raw_billing: Dict[str, Any], created_at: str, update
     return billing
 
 
-def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amount: str = "150.00") -> Dict[str, Any]:
+def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amount: str = "150.00", action: str = "on_status") -> Dict[str, Any]:
     """Construct full RET10 compliant payment structure with dual settlement_details and payment.params."""
     payment = dict(raw_payment) if raw_payment else {}
     bpp_id = settings.ONDC_SUBSCRIBER_ID
@@ -500,7 +489,7 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
     if "type" not in payment:
         payment["type"] = "ON-ORDER"
     if "status" not in payment:
-        payment["status"] = "PAID"
+        payment["status"] = "NOT-PAID" if action in ("on_select", "on_init") else "PAID"
     # collected_by MUST be "BPP" — consistent with BAP INIT/CONFIRM
     payment["collected_by"] = "BPP"
 
@@ -580,7 +569,7 @@ def build_canonical_order(
     fulfillments = build_canonical_fulfillments(raw_fulfillments, state_code, action)
     quote = build_canonical_quote(raw_items)
     payment_source = incoming_order.get("payment") or (stored_order or {}).get("payment", {})
-    payment = build_canonical_payment(payment_source, bap_id, quote["price"]["value"])
+    payment = build_canonical_payment(payment_source, bap_id, quote["price"]["value"], action=action)
     tags = build_canonical_tags(include_bap_terms=(action == "on_confirm"))
 
     provider = incoming_order.get("provider") or (stored_order or {}).get("provider") or {
@@ -777,33 +766,35 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item, dict):
             errors.append(f"Quote breakup[{idx}] missing item object")
             continue
-        if not isinstance(item.get("parent_item_id"), str) or not item.get("parent_item_id"):
-            errors.append(f"Quote breakup[{idx}].item missing parent_item_id string")
-        if not isinstance(item.get("tags"), list):
-            errors.append(f"Quote breakup[{idx}].item missing tags array")
-        else:
-            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
-            allowed_quote_type_values = {"item", "customization", "fulfillment"}
-            for tag_idx, tag in enumerate(item.get("tags", [])):
-                tag_code = tag.get("code") if isinstance(tag, dict) else None
-                if tag_code not in allowed_quote_tag_codes:
-                    errors.append(
-                        f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
-                    )
-                if tag_code == "type":
-                    for list_idx, list_item in enumerate(tag.get("list", [])):
-                        if (
-                            isinstance(list_item, dict)
-                            and list_item.get("code") == "type"
-                            and list_item.get("value") not in allowed_quote_type_values
-                        ):
-                            errors.append(
-                                f"Quote breakup[{idx}].item.tags[{tag_idx}].list[{list_idx}].value must be one of {sorted(allowed_quote_type_values)}"
-                            )
-        if not item.get("price"):
-            errors.append(f"Quote breakup[{idx}].item missing price object")
-        if not item.get("quantity"):
-            errors.append(f"Quote breakup[{idx}].item missing quantity object")
+        title_type = entry.get("@ondc/org/title_type")
+        if title_type == "item":
+            if not isinstance(item.get("parent_item_id"), str) or not item.get("parent_item_id"):
+                errors.append(f"Quote breakup[{idx}].item missing parent_item_id string")
+            if "tags" in item and not isinstance(item.get("tags"), list):
+                errors.append(f"Quote breakup[{idx}].item tags must be an array")
+            elif isinstance(item.get("tags"), list):
+                allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group", "quote", "np_fees", "offer"}
+                allowed_quote_type_values = {"fulfillment", "order", "item", "customization"}
+                for tag_idx, tag in enumerate(item.get("tags", [])):
+                    tag_code = tag.get("code") if isinstance(tag, dict) else None
+                    if tag_code not in allowed_quote_tag_codes:
+                        errors.append(
+                            f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
+                        )
+                    if tag_code in ("quote", "type"):
+                        for list_idx, list_item in enumerate(tag.get("list", [])):
+                            if (
+                                isinstance(list_item, dict)
+                                and list_item.get("code") == "type"
+                                and list_item.get("value") not in allowed_quote_type_values
+                            ):
+                                errors.append(
+                                    f"Quote breakup[{idx}].item.tags[{tag_idx}].list[{list_idx}].value must be one of {sorted(allowed_quote_type_values)}"
+                                )
+            if not item.get("price"):
+                errors.append(f"Quote breakup[{idx}].item missing price object")
+            if not item.get("quantity"):
+                errors.append(f"Quote breakup[{idx}].item missing quantity object")
 
     # 9. Payment settlement validation
     settlements = payment.get("@ondc/org/settlement_details", [])

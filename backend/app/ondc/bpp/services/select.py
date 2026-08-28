@@ -16,15 +16,28 @@ class BppSelectService:
 
         await asyncio.sleep(0.5)
 
+        incoming_items = payload.get("message", {}).get("order", {}).get("items", [])
+        is_oos = is_out_of_stock_flow(transaction_id)
+        if not is_oos and incoming_items:
+            from app.ondc.bpp.order_builder import _get_catalog_item_map
+            catalog_map = _get_catalog_item_map()
+            for it in incoming_items:
+                it_id = it.get("id")
+                cat_it = catalog_map.get(it_id)
+                req_qty = int(it.get("quantity", {}).get("selected", {}).get("count") or it.get("quantity", {}).get("count", 1))
+                avail_qty = int((cat_it or {}).get("quantity", {}).get("available", {}).get("count", 99))
+                if req_qty > avail_qty or (cat_it and avail_qty == 0):
+                    is_oos = True
+                    break
+
         order_obj = build_canonical_order(
             action="on_select",
             payload=payload,
-            state_code="Non-serviceable" if is_out_of_stock_flow(transaction_id) and select_count >= 2 else "Serviceable",
+            state_code="Non-serviceable" if is_oos or select_count >= 2 else "Serviceable",
         )
 
-        # Out-of-stock flow: Workbench's second select expects an ONDC domain
-        # error at callback root, not an invalid message.order.error field.
-        if select_count >= 2:
+        # Out-of-stock flow: Workbench expects an ONDC domain error at callback root
+        if is_oos or select_count >= 2:
             lifecycle_tracker.mark_out_of_stock_flow(transaction_id)
             for item in order_obj.get("items", []):
                 item.get("quantity", {}).setdefault("selected", {})["count"] = 0

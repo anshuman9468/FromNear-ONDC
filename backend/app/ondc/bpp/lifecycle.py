@@ -67,6 +67,15 @@ def is_prepaid_track_flow(transaction_id: str | None = None) -> bool:
     )
 
 
+def is_buyer_cancel_flow() -> bool:
+    """Buyer cancellation waits for /cancel instead of pushing delivery status."""
+    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {
+        "cancel",
+        "buyer_cancel",
+        "buyer_cancellation",
+    }
+
+
 def is_out_of_stock_flow(transaction_id: str | None = None) -> bool:
     return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {"out_of_stock", "oos"} or (
         transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
@@ -106,6 +115,9 @@ async def push_post_confirm_lifecycle(
 ) -> None:
     """Push unsolicited lifecycle callbacks required by Pramaan after on_confirm."""
     transaction_id = context.get("transaction_id", "default_tx")
+
+    if is_buyer_cancel_flow():
+        return
 
     if is_rto_flow(context, payload):
         if lifecycle_tracker.is_cancelled(transaction_id):

@@ -107,5 +107,10 @@ class LifecycleTracker:
         session["sent_callbacks"].add(key)
         logger.info(f"[LIFECYCLE TRACE] tx={transaction_id} recorded callback: {key}")
 
+    def has_callback(self, transaction_id: str, action: str, state_code: Optional[str] = None) -> bool:
+        """Return whether a callback has already been reserved or sent."""
+        key = f"{action}:{state_code}" if state_code else action
+        return key in self.get_or_create(transaction_id)["sent_callbacks"]
+
 
 lifecycle_tracker = LifecycleTracker()

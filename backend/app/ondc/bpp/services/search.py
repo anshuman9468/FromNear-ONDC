@@ -134,15 +134,16 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
                 loc["time"]["days"] = days
             else:
                 loc["time"]["days"] = "1,2,3,4,5,6,7"
-            # RET10 catalog locations use HHMM store hours, not ISO timestamps.
             loc["time"]["range"] = {
-                "start": "0900",
-                "end": "2100",
+                "start": now_ts,
+                "end": now_ts,
             }
             if "schedule" not in loc["time"]:
-                loc["time"]["schedule"] = {"holidays": ["2026-01-01"]}
-            elif not loc["time"]["schedule"].get("holidays"):
-                loc["time"]["schedule"]["holidays"] = ["2026-01-01"]
+                loc["time"]["schedule"] = {"holidays": ["2026-01-01"], "times": ["0900", "2100"]}
+            else:
+                loc["time"]["schedule"]["times"] = loc["time"]["schedule"].get("times") or ["0900", "2100"]
+                if not loc["time"]["schedule"].get("holidays"):
+                    loc["time"]["schedule"]["holidays"] = ["2026-01-01"]
 
         categories = provider.get("categories", [])
         for idx, category in enumerate(categories):

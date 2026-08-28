@@ -81,10 +81,10 @@ class BppNetworkClient:
         context["transaction_id"] = context.get("transaction_id") or str(uuid.uuid4())
         context["message_id"] = context.get("message_id") or str(uuid.uuid4())
         context["action"] = action
-        context["bpp_id"] = settings.ONDC_SUBSCRIBER_ID
-        context["bpp_uri"] = settings.ONDC_SUBSCRIBER_URI
+        context["bpp_id"] = request_context.get("bpp_id") or settings.ONDC_SUBSCRIBER_ID
+        context["bpp_uri"] = request_context.get("bpp_uri") or settings.ONDC_SUBSCRIBER_URI
         context["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        if context.get("city") == "*" or not context.get("city"):
+        if not context.get("city") or (context.get("city") == "*" and action != "on_search"):
             context["city"] = settings.ONDC_CITY
         # Preserve message_id from the original request — do NOT generate a new one
         return context
@@ -102,11 +102,11 @@ class BppNetworkClient:
         context["bap_uri"] = context.get("bap_uri") or "http://localhost:3000/mock/bap"
         context["transaction_id"] = context.get("transaction_id") or str(uuid.uuid4())
         context["action"] = action
-        context["bpp_id"] = settings.ONDC_SUBSCRIBER_ID
-        context["bpp_uri"] = settings.ONDC_SUBSCRIBER_URI
+        context["bpp_id"] = base_context.get("bpp_id") or settings.ONDC_SUBSCRIBER_ID
+        context["bpp_uri"] = base_context.get("bpp_uri") or settings.ONDC_SUBSCRIBER_URI
         context["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         context["message_id"] = str(uuid.uuid4())
-        if context.get("city") == "*" or not context.get("city"):
+        if not context.get("city") or (context.get("city") == "*" and action != "on_search"):
             context["city"] = settings.ONDC_CITY
         return context
 

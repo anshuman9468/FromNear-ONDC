@@ -17,6 +17,11 @@ class BppCancelService:
             context = payload.get("context", {})
             message = payload.get("message", {})
             transaction_id = context.get("transaction_id", "default_tx")
+            # Workbench may retry /cancel while the first handler is still
+            # running. Only one terminal callback is valid for a transaction.
+            if lifecycle_tracker.has_callback(transaction_id, "on_cancel"):
+                logger.info(f"Ignoring duplicate /cancel for tx {transaction_id}")
+                return
             lifecycle_tracker.cancel_lifecycle_task(transaction_id)
             order_id = message.get("order_id", "2026-07-27-1001")
             cancellation_reason_id = str(message.get("cancellation_reason_id") or "002")
@@ -56,6 +61,9 @@ class BppCancelService:
                 logger.error(f"RET10 Validation Failed for on_cancel: {errors}")
                 raise ValueError(f"RET10 Schema Error: {errors}")
 
+            # Reserve the callback before the network await so concurrent
+            # retries cannot emit a second on_cancel.
+            lifecycle_tracker.record_callback(transaction_id, "on_cancel")
             await bpp_client.send_callback(context, "on_cancel", response_message)
         except Exception as e:
             logger.error(f"ERROR in process_cancel: {e}", exc_info=True)

@@ -43,9 +43,9 @@ def _money(value: Any, default: str = "0.00") -> str:
 
 
 def _ret10_quote_tags(kind: str) -> List[Dict[str, Any]]:
-    # quote.breakup[].item is an Item object and follows the standard item
-    # tag vocabulary used by the Workbench RET10 validator.
-    return [{"code": "type", "list": [{"code": "type", "value": kind}]}]
+    # RET10 quote breakup items use the quote tag namespace. The nested type
+    # value distinguishes a product line from a fulfillment charge.
+    return [{"code": "quote", "list": [{"code": "type", "value": kind}]}]
 
 
 def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
