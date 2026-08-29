@@ -9,7 +9,7 @@ from app.ondc.bpp.order_builder import (
     RET10_FULFILLMENT_STATE,
 )
 from app.ondc.bpp.state_machine import lifecycle_tracker
-from app.ondc.bpp.lifecycle import push_post_confirm_lifecycle
+from app.ondc.bpp.lifecycle import is_rto_flow, push_post_confirm_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,9 @@ class BppConfirmService:
         incoming_order = message.get("order", {})
         transaction_id = context.get("transaction_id", "default_tx")
         stored_order = lifecycle_tracker.get_stored_order(transaction_id)
+
+        if is_rto_flow(context, payload):
+            lifecycle_tracker.mark_rto_flow(transaction_id)
 
         await asyncio.sleep(0.5)
 

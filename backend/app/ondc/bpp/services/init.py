@@ -3,6 +3,7 @@ import asyncio
 from app.ondc.bpp.client import bpp_client
 from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload
 from app.ondc.bpp.state_machine import lifecycle_tracker
+from app.ondc.bpp.lifecycle import is_rto_flow
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,9 @@ class BppInitService:
         context = payload.get("context", {})
         transaction_id = context.get("transaction_id", "default_tx")
         stored_order = lifecycle_tracker.get_stored_order(transaction_id)
+
+        if is_rto_flow(context, payload):
+            lifecycle_tracker.mark_rto_flow(transaction_id)
 
         await asyncio.sleep(0.5)
 

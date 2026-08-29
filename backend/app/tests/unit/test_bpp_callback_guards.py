@@ -7,7 +7,8 @@ from app.main import app
 from app.ondc.bpp.client import BppNetworkClient
 from app.ondc.bpp.order_builder import build_canonical_order, build_canonical_quote, validate_ret10_payload
 from app.ondc.bpp.services.search import BppSearchService, _is_incremental_push, _normalize_catalog_quantities
-from app.ondc.bpp.state_machine import LifecycleTracker
+from app.ondc.bpp.lifecycle import is_rto_flow
+from app.ondc.bpp.state_machine import LifecycleTracker, lifecycle_tracker
 
 
 CONTEXT = {
@@ -181,3 +182,32 @@ def test_cancel_marks_lifecycle_as_cancelled_before_task_cancellation():
     tracker = LifecycleTracker()
     tracker.cancel_lifecycle_task("tx-cancel")
     assert tracker.is_cancelled("tx-cancel") is True
+
+
+def test_rto_flow_is_detected_from_workbench_order_tags():
+    payload = {
+        "message": {
+            "order": {
+                "items": [{"id": "I1", "tags": [{"code": "rto_action", "list": [{"code": "action", "value": "return"}]}]}]
+            }
+        }
+    }
+    assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is True
+
+
+def test_rto_detection_does_not_classify_buyer_return_tags():
+    payload = {
+        "message": {
+            "order": {
+                "fulfillments": [{"tags": [{"code": "return_request", "list": []}]}]
+            }
+        }
+    }
+    assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is False
+
+
+def test_rto_classification_persists_after_select_marker_is_gone():
+    transaction_id = "opaque-rto-transaction"
+    lifecycle_tracker.mark_rto_flow(transaction_id)
+
+    assert is_rto_flow({"transaction_id": transaction_id}, {"message": {"order": {}}}) is True

@@ -40,12 +40,51 @@ RTO_STATUS_SEQUENCE = [
 
 
 def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) -> bool:
-    """Workbench does not send a formal flow name, so use the pasted tx/message hint."""
+    """Identify merchant-side RTO without depending on a Workbench flow name.
+
+    Workbench generates opaque transaction IDs.  The only durable signal is
+    the RTO marker carried in the order tags, so inspect the inbound order
+    before falling back to explicit local mode or legacy transaction hints.
+    """
     flow_mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
     if flow_mode == "rto":
         return True
     if flow_mode in {"buyer_return", "return", "status"}:
         return False
+
+    transaction_id = context.get("transaction_id")
+    if transaction_id and lifecycle_tracker.is_rto_flow(transaction_id):
+        return True
+
+    order = (payload or {}).get("message", {}).get("order", {})
+    if isinstance(order, dict):
+        for collection_name in ("items", "fulfillments"):
+            collection = order.get(collection_name, [])
+            if not isinstance(collection, list):
+                continue
+            for entry in collection:
+                if not isinstance(entry, dict):
+                    continue
+                tags = entry.get("tags", [])
+                if not isinstance(tags, list):
+                    continue
+                for tag in tags:
+                    if not isinstance(tag, dict):
+                        continue
+                    code = str(tag.get("code", "")).lower()
+                    if code in {"rto_action", "cancel_request"}:
+                        return True
+                    # Some Workbench fixtures wrap the marker in a tag list.
+                    for value in tag.get("list", []) or []:
+                        if not isinstance(value, dict):
+                            continue
+                        nested_code = str(value.get("code", "")).lower()
+                        nested_value = str(value.get("value", "")).lower()
+                        if nested_code in {"rto_action", "cancel_request"} or nested_value in {
+                            "rto",
+                            "rto_action",
+                        }:
+                            return True
 
     haystack = " ".join(
         str(value).lower()

@@ -3,7 +3,7 @@ import asyncio
 from app.ondc.bpp.client import bpp_client
 from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload
 from app.ondc.bpp.state_machine import lifecycle_tracker
-from app.ondc.bpp.lifecycle import is_out_of_stock_flow
+from app.ondc.bpp.lifecycle import is_out_of_stock_flow, is_rto_flow
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,12 @@ class BppSelectService:
         context = payload.get("context", {})
         transaction_id = context.get("transaction_id", "default_tx")
         select_count = lifecycle_tracker.increment_select(transaction_id)
+
+        # Workbench carries the merchant-side RTO marker on /select, while
+        # later /init and /confirm payloads may omit it. Persist it now so
+        # callback scheduling remains tied to the actual flow.
+        if is_rto_flow(context, payload):
+            lifecycle_tracker.mark_rto_flow(transaction_id)
 
         await asyncio.sleep(0.5)
 

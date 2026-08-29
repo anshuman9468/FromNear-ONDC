@@ -19,6 +19,7 @@ class LifecycleTracker:
                 "select_call_count": 0,
                 "track_requested": False,
                 "out_of_stock_flow": False,
+                "rto_flow": False,
                 "sent_callbacks": set(),
                 "stored_order": None,
                 "stored_context": None,
@@ -88,6 +89,13 @@ class LifecycleTracker:
 
     def mark_out_of_stock_flow(self, transaction_id: str) -> None:
         self.get_or_create(transaction_id)["out_of_stock_flow"] = True
+
+    def mark_rto_flow(self, transaction_id: str) -> None:
+        """Persist RTO classification across callbacks that omit RTO tags."""
+        self.get_or_create(transaction_id)["rto_flow"] = True
+
+    def is_rto_flow(self, transaction_id: str) -> bool:
+        return bool(self.get_or_create(transaction_id).get("rto_flow"))
 
     def is_out_of_stock_flow(self, transaction_id: str) -> bool:
         return bool(self.get_or_create(transaction_id).get("out_of_stock_flow"))
