@@ -1,5 +1,6 @@
 import json
 import logging
+import asyncio
 import httpx
 import uuid
 from datetime import datetime, timezone
@@ -28,9 +29,16 @@ class BppNetworkClient:
 
         if action == "on_search" and isinstance(normalized.get("catalog"), dict):
             # Imported lazily to avoid the search-service/client import cycle.
-            from app.ondc.bpp.services.search import _normalize_catalog_quantities
+            from app.ondc.bpp.services.search import _catalog_hours_range, _normalize_catalog_quantities
 
             normalized["catalog"] = _normalize_catalog_quantities(normalized["catalog"])
+            # The core schema defines Time.range as RFC3339 date-times.
+            for provider in normalized["catalog"].get("bpp/providers", []):
+                for location in provider.get("locations", []):
+                    time = location.setdefault("time", {})
+                    time["range"] = _catalog_hours_range()
+                    if not isinstance(time.get("days"), str) or not time["days"].strip():
+                        time["days"] = "1,2,3,4,5,6,7"
             return normalized
 
         order_actions = {"on_select", "on_init", "on_confirm", "on_status", "on_update", "on_cancel"}
@@ -81,8 +89,11 @@ class BppNetworkClient:
         context["transaction_id"] = context.get("transaction_id") or str(uuid.uuid4())
         context["message_id"] = context.get("message_id") or str(uuid.uuid4())
         context["action"] = action
-        context["bpp_id"] = request_context.get("bpp_id") or settings.ONDC_SUBSCRIBER_ID
-        context["bpp_uri"] = request_context.get("bpp_uri") or settings.ONDC_SUBSCRIBER_URI
+        # These identify the participant sending the callback. Never echo a
+        # malformed target value from an inbound request; Workbench compares
+        # them with the BPP registered in the first search response.
+        context["bpp_id"] = settings.ONDC_SUBSCRIBER_ID
+        context["bpp_uri"] = settings.ONDC_SUBSCRIBER_URI
         context["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         if not context.get("city") or (context.get("city") == "*" and action != "on_search"):
             context["city"] = settings.ONDC_CITY
@@ -102,8 +113,8 @@ class BppNetworkClient:
         context["bap_uri"] = context.get("bap_uri") or "http://localhost:3000/mock/bap"
         context["transaction_id"] = context.get("transaction_id") or str(uuid.uuid4())
         context["action"] = action
-        context["bpp_id"] = base_context.get("bpp_id") or settings.ONDC_SUBSCRIBER_ID
-        context["bpp_uri"] = base_context.get("bpp_uri") or settings.ONDC_SUBSCRIBER_URI
+        context["bpp_id"] = settings.ONDC_SUBSCRIBER_ID
+        context["bpp_uri"] = settings.ONDC_SUBSCRIBER_URI
         context["timestamp"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         context["message_id"] = str(uuid.uuid4())
         if not context.get("city") or (context.get("city") == "*" and action != "on_search"):
@@ -113,10 +124,19 @@ class BppNetworkClient:
     async def send_callback(self, request_context: dict, action: str, message: dict):
         """Send a direct callback — echoes the same message_id as the request."""
         await self._post(request_context, action, message, unsolicited=False)
+        # Workbench records a direct callback asynchronously.  Yield before a
+        # lifecycle task emits the next unsolicited message, otherwise the
+        # next step can be classified as out-of-sequence and validated as an
+        # empty response even though the callback was accepted by HTTP.
+        await asyncio.sleep(1.0)
 
     async def send_unsolicited(self, base_context: dict, action: str, message: dict):
         """Send an unsolicited push — generates a new message_id."""
         await self._post(base_context, action, message, unsolicited=True)
+        # Workbench records unsolicited callbacks asynchronously. Keep
+        # callbacks for one transaction ordered before the next lifecycle
+        # state is emitted.
+        await asyncio.sleep(1.0)
 
     async def send_callback_error(self, request_context: dict, action: str, error: dict, message: dict | None = None):
         """Send a direct callback with a root ONDC error object."""
@@ -177,6 +197,14 @@ class BppNetworkClient:
             "context": context,
             "message": self._canonicalize_message(base_context, action, message),
         }
+        # Revalidate the exact object that is about to be serialized. This
+        # catches regressions introduced by the final network canonicalizer.
+        if action in {"on_select", "on_init", "on_confirm", "on_status", "on_update", "on_cancel"}:
+            from app.ondc.bpp.order_builder import validate_ret10_payload
+
+            wire_errors = validate_ret10_payload(action, payload)
+            if wire_errors:
+                raise ValueError(f"RET10 wire payload rejected for {action}: {wire_errors}")
         body_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
         auth_header = generate_auth_header(
             body_bytes,
@@ -210,6 +238,17 @@ class BppNetworkClient:
             import traceback
             stack = "".join(traceback.format_stack()[:-1])
             log_msg += f"Stack Frame for on_update:\n{stack}\n"
+        if action == "on_cancel":
+            wire_order = payload["message"].get("order", {})
+            wire_fulfillments = wire_order.get("fulfillments", [])
+            log_msg += (
+                "Wire completeness: "
+                f"cancellation_reason={wire_order.get('cancellation', {}).get('reason', {}).get('id')} "
+                f"fulfillments={len(wire_fulfillments)} "
+                f"start_gps={[f.get('start', {}).get('location', {}).get('gps') for f in wire_fulfillments]} "
+                f"start_phones={[f.get('start', {}).get('contact', {}).get('phone') for f in wire_fulfillments]} "
+                f"end_phones={[f.get('end', {}).get('contact', {}).get('phone') for f in wire_fulfillments]}\n"
+            )
         
         logger.info(log_msg)
 

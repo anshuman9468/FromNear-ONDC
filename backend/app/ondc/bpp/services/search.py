@@ -3,6 +3,7 @@ import logging
 import asyncio
 import copy
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from app.core.settings import settings
 from app.ondc.bpp.client import bpp_client
@@ -42,6 +43,15 @@ DEFAULT_ITEM_TAGS = [
         "list": [{"code": "id", "value": "FINDER_FEE"}],
     }
 ]
+
+
+def _catalog_hours_range() -> dict:
+    """Return the RFC3339 operating-hours range required by the core schema."""
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return {
+        "start": today.replace(hour=9).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "end": today.replace(hour=21).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
 
 
 def _stringify_statutory_fields(statutory: dict) -> dict:
@@ -134,10 +144,7 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
                 loc["time"]["days"] = days
             else:
                 loc["time"]["days"] = "1,2,3,4,5,6,7"
-            loc["time"]["range"] = {
-                "start": now_ts,
-                "end": now_ts,
-            }
+            loc["time"]["range"] = _catalog_hours_range()
             if "schedule" not in loc["time"]:
                 loc["time"]["schedule"] = {"holidays": ["2026-01-01"], "times": ["0900", "2100"]}
             else:

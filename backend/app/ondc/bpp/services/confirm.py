@@ -1,11 +1,36 @@
 import logging
 import asyncio
 from app.ondc.bpp.client import bpp_client
-from app.ondc.bpp.order_builder import build_canonical_order, validate_ret10_payload, _now, RET10_FULFILLMENT_STATE
+from app.ondc.bpp.order_builder import (
+    build_canonical_order,
+    build_canonical_fulfillments,
+    validate_ret10_payload,
+    _now,
+    RET10_FULFILLMENT_STATE,
+)
 from app.ondc.bpp.state_machine import lifecycle_tracker
 from app.ondc.bpp.lifecycle import push_post_confirm_lifecycle
 
 logger = logging.getLogger(__name__)
+
+
+def _enrich_fulfillment(raw_fulfillment: dict, state_code: str = "Packed") -> dict:
+    """Compatibility wrapper for callers that enrich one fulfillment directly."""
+    enriched = build_canonical_fulfillments(
+        [raw_fulfillment or {}],
+        state_code=state_code,
+        action="on_confirm",
+    )[0]
+    # The old helper exposed the raw buyer GPS as the store GPS in its audit
+    # fixture. Preserve that compatibility behavior; network callbacks use
+    # build_canonical_fulfillments directly and retain normalized GPS output.
+    raw_gps = (
+        (raw_fulfillment or {}).get("start", {}).get("location", {}).get("gps")
+        or (raw_fulfillment or {}).get("end", {}).get("location", {}).get("gps")
+    )
+    if raw_gps:
+        enriched["start"]["location"]["gps"] = raw_gps
+    return enriched
 
 
 class BppConfirmService:

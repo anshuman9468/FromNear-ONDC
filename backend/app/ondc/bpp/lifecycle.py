@@ -88,6 +88,32 @@ async def _send_lifecycle_callback(
     order_obj: Dict[str, Any],
     unsolicited: bool,
 ) -> None:
+    # Rebuild at the last boundary so asynchronous callbacks cannot carry a
+    # partially stored fulfillment after a lifecycle update or cancellation.
+    lifecycle_cancellation = order_obj.get("cancellation")
+    fulfillment = next(
+        (item for item in order_obj.get("fulfillments", []) if isinstance(item, dict)),
+        {},
+    )
+    callback_state = (
+        fulfillment.get("state", {}).get("descriptor", {}).get("code")
+        or "Pending"
+    )
+    order_obj = build_canonical_order(
+        action=action,
+        payload={"context": context, "message": {"order": order_obj}},
+        state_code=callback_state,
+        order_id=order_obj.get("id"),
+        created_at=order_obj.get("created_at"),
+        updated_at=order_obj.get("updated_at"),
+        stored_order=order_obj,
+        order_state=order_obj.get("state"),
+    )
+    # The generic order builder intentionally does not own lifecycle-specific
+    # fields. Preserve cancellation details across this final rebuild so the
+    # RTO on_cancel callback retains cancellation.reason.id on the wire.
+    if isinstance(lifecycle_cancellation, dict):
+        order_obj["cancellation"] = dict(lifecycle_cancellation)
     response_payload = {
         "context": (
             bpp_client._create_unsolicited_context(context, action)

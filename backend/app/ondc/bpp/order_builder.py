@@ -45,7 +45,7 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        "code": "type",
+        "code": "quote",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -177,13 +177,24 @@ def _resolve_parent_item_id(catalog_item: Optional[Dict[str, Any]], incoming: An
     return DEFAULT_PARENT_ITEM_ID
 
 
-def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any]], unit_price: float, quantity: int = 1) -> Dict[str, Any]:
+def _build_quote_item_details(
+    item_id: str,
+    catalog_item: Optional[Dict[str, Any]],
+    unit_price: float,
+    quantity: int = 1,
+    quote_type: str = "item",
+) -> Dict[str, Any]:
     """Build a fully populated quote.breakup[].item object."""
+    item_id = str(item_id or "F1")
+    quote_type = str(quote_type or "item")
     max_count = "5"
     avail_count = "99"
     if catalog_item:
-        max_count = str(catalog_item.get("quantity", {}).get("maximum", {}).get("count", 5))
-        avail_count = str(catalog_item.get("quantity", {}).get("available", {}).get("count", 99))
+        quantity = catalog_item.get("quantity") if isinstance(catalog_item.get("quantity"), dict) else {}
+        maximum = quantity.get("maximum") if isinstance(quantity.get("maximum"), dict) else {}
+        available = quantity.get("available") if isinstance(quantity.get("available"), dict) else {}
+        max_count = str(maximum.get("count") or 5)
+        avail_count = str(available.get("count") or 99)
     return {
         "id": item_id,
         "quantity": {
@@ -194,36 +205,49 @@ def _build_quote_item_details(item_id: str, catalog_item: Optional[Dict[str, Any
         },
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
-        # Quote-breakup tags have a distinct RET10 BPP vocabulary.
-        "tags": DEFAULT_QUOTE_ITEM_TAGS,
+        # Quote-breakup tags have a distinct RET10 BPP vocabulary. Delivery
+        # breakup lines use the same tag with type=fulfillment.
+        "tags": [{
+            "code": "quote",
+            "list": [{"code": "type", "value": quote_type}],
+        }],
     }
 
 
 def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Build a fully enriched order.items[] entry from catalog + incoming data."""
-    item_id = it.get("id", "I1")
+    it = it if isinstance(it, dict) else {}
+    item_id = str(it.get("id") or "I1")
     catalog_item = catalog_map.get(item_id)
+    incoming_quantity = it.get("quantity") if isinstance(it.get("quantity"), dict) else {}
+    selected_quantity = incoming_quantity.get("selected") if isinstance(incoming_quantity.get("selected"), dict) else {}
     qty = (
-        it.get("quantity", {}).get("selected", {}).get("count")
-        or it.get("quantity", {}).get("count", 1)
+        selected_quantity.get("count")
+        or incoming_quantity.get("count", 1)
     )
+    try:
+        qty = max(1, int(qty))
+    except (TypeError, ValueError):
+        qty = 1
     item_obj: Dict[str, Any] = {
         "id": item_id,
-        "fulfillment_id": it.get("fulfillment_id") or (catalog_item or {}).get("fulfillment_id") or "F1",
+        "fulfillment_id": str(it.get("fulfillment_id") or (catalog_item or {}).get("fulfillment_id") or "F1"),
         "location_id": (
-            it.get("location_id")
-            or it.get("location")
-            or (catalog_item or {}).get("location_id")
-            or "L1"
+            str(
+                it.get("location_id")
+                or it.get("location")
+                or (catalog_item or {}).get("location_id")
+                or "L1"
+            )
         ),
         # parent_item_id is MANDATORY in all BPP responses per RET10 schema
         "parent_item_id": _resolve_parent_item_id(catalog_item, it.get("parent_item_id")),
         "tags": _resolve_item_tags(catalog_item, it.get("tags")),
     }
     if action == "on_select":
-        item_obj["quantity"] = {"selected": {"count": int(qty)}}
+        item_obj["quantity"] = {"selected": {"count": qty}}
     else:
-        item_obj["quantity"] = {"count": int(qty)}
+        item_obj["quantity"] = {"count": qty}
     return item_obj
 
 
@@ -235,9 +259,15 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_value = 0.0
 
     for item in items:
-        item_id = item.get("id")
-        quantity = item.get("quantity", {}).get("selected", {}).get("count") or \
-                   item.get("quantity", {}).get("count", 1)
+        item = item if isinstance(item, dict) else {}
+        item_id = str(item.get("id") or "I1")
+        incoming_quantity = item.get("quantity") if isinstance(item.get("quantity"), dict) else {}
+        selected_quantity = incoming_quantity.get("selected") if isinstance(incoming_quantity.get("selected"), dict) else {}
+        quantity = selected_quantity.get("count") or incoming_quantity.get("count", 1)
+        try:
+            quantity = max(1, int(quantity))
+        except (TypeError, ValueError):
+            quantity = 1
         catalog_item = item_map.get(item_id)
         price = float((catalog_item or {}).get("price", {}).get("value", 250.0))
         item_total = price * quantity
@@ -261,9 +291,15 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         "title": "Delivery charges",
         "@ondc/org/title_type": "delivery",
         "price": {"currency": "INR", "value": f"{delivery_charge:.2f}"},
-        "item": {
-            "id": "F1"
-        }
+        # RET10 validates breakup.item uniformly for product and delivery
+        # lines. Do not emit the tempting but incomplete {"id": "F1"} form.
+        "item": _build_quote_item_details(
+            "F1",
+            None,
+            delivery_charge,
+            1,
+            quote_type="fulfillment",
+        ),
     })
 
     return {
@@ -301,11 +337,18 @@ def build_canonical_fulfillments(
     now_str = _now()
     for index, f in enumerate(raw_fulfillments):
         f_copy = dict(f) if f else {}
-        f_copy["id"] = f_copy.get("id", "F1")
-        if state_code.startswith("Return") or state_code == "Liquidated":
+        f_copy["id"] = str(f_copy.get("id") or "F1")
+        # RET10's on_cancel rules select the delivery fulfillment explicitly
+        # (fulfillments[?(@.type=='Delivery')]). Keep the original delivery
+        # fulfillment type on cancellation even when the preceding RTO status
+        # used a Return state; otherwise Workbench treats all delivery fields
+        # as missing because its selector matches no fulfillment.
+        if action == "on_cancel":
+            f_copy["type"] = "Delivery"
+        elif state_code.startswith("Return") or state_code == "Liquidated":
             f_copy["type"] = "Return"
         else:
-            f_copy["type"] = f_copy.get("type", "Delivery")
+            f_copy["type"] = str(f_copy.get("type") or "Delivery")
         f_copy["@ondc/org/provider_name"] = f_copy.get("@ondc/org/provider_name") or "FromNear Store"
         f_copy["tracking"] = f_copy.get("tracking") if isinstance(f_copy.get("tracking"), bool) else False
         f_copy["@ondc/org/category"] = f_copy.get("@ondc/org/category") or "Standard Delivery"
@@ -438,6 +481,8 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
     now_str = _now()
 
     incoming_settlements = payment.get("@ondc/org/settlement_details", [])
+    if not isinstance(incoming_settlements, list):
+        incoming_settlements = []
     settlement_details = [
         {
             "settlement_counterparty": "seller-app",
@@ -457,24 +502,22 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
     ]
 
     for sd in incoming_settlements:
+        if not isinstance(sd, dict):
+            continue
         sd_copy = dict(sd)
         if sd_copy.get("settlement_counterparty") == "buyer-app":
             sd_copy["subscriber_id"] = bap_id
-            if "settlement_timestamp" not in sd_copy:
-                sd_copy["settlement_timestamp"] = now_str
-            if "settlement_amount" not in sd_copy:
-                sd_copy["settlement_amount"] = total_amount
-            sd_copy["upi_address"] = sd_copy.get("upi_address") or "bap@upi"
-            sd_copy["settlement_status"] = sd_copy.get("settlement_status") or "PAID"
+            sd_copy["settlement_timestamp"] = str(sd_copy.get("settlement_timestamp") or now_str)
+            sd_copy["settlement_amount"] = str(sd_copy.get("settlement_amount") or total_amount)
+            sd_copy["upi_address"] = str(sd_copy.get("upi_address") or "bap@upi")
+            sd_copy["settlement_status"] = str(sd_copy.get("settlement_status") or "PAID")
             settlement_details.append(sd_copy)
         elif sd_copy.get("settlement_counterparty") == "seller-app":
             sd_copy["subscriber_id"] = bpp_id
-            if "settlement_timestamp" not in sd_copy:
-                sd_copy["settlement_timestamp"] = now_str
-            if "settlement_amount" not in sd_copy:
-                sd_copy["settlement_amount"] = total_amount
-            sd_copy["upi_address"] = sd_copy.get("upi_address") or "fromnear@upi"
-            sd_copy["settlement_status"] = sd_copy.get("settlement_status") or "PAID"
+            sd_copy["settlement_timestamp"] = str(sd_copy.get("settlement_timestamp") or now_str)
+            sd_copy["settlement_amount"] = str(sd_copy.get("settlement_amount") or total_amount)
+            sd_copy["upi_address"] = str(sd_copy.get("upi_address") or "fromnear@upi")
+            sd_copy["settlement_status"] = str(sd_copy.get("settlement_status") or "PAID")
             settlement_details[0] = sd_copy
 
     payment["@ondc/org/settlement_details"] = settlement_details
@@ -486,9 +529,9 @@ def build_canonical_payment(raw_payment: Dict[str, Any], bap_id: str, total_amou
         payment["@ondc/org/buyer_app_finder_fee_type"] = "percent"
     if "@ondc/org/buyer_app_finder_fee_amount" not in payment:
         payment["@ondc/org/buyer_app_finder_fee_amount"] = "3"
-    if "type" not in payment:
+    if not payment.get("type"):
         payment["type"] = "ON-ORDER"
-    if "status" not in payment:
+    if not payment.get("status"):
         payment["status"] = "NOT-PAID" if action in ("on_select", "on_init") else "PAID"
     # collected_by MUST be "BPP" — consistent with BAP INIT/CONFIRM
     payment["collected_by"] = "BPP"
@@ -558,6 +601,9 @@ def build_canonical_order(
     ord_updated_at = updated_at or incoming_order.get("updated_at") or now_str
 
     raw_items = incoming_order.get("items", [])
+    if not isinstance(raw_items, list):
+        raw_items = []
+    raw_items = [item for item in raw_items if isinstance(item, dict)]
     if not raw_items:
         raw_items = [{"id": "I1", "quantity": {"count": 1}}]
 
@@ -576,6 +622,17 @@ def build_canonical_order(
         "id": "P1",
         "locations": [{"id": "L1"}],
     }
+    provider = dict(provider) if isinstance(provider, dict) else {}
+    provider["id"] = str(provider.get("id") or "P1")
+    provider_locations = provider.get("locations")
+    if not isinstance(provider_locations, list) or not provider_locations:
+        provider_locations = [{"id": "L1"}]
+    normalized_locations = []
+    for location in provider_locations:
+        location = dict(location) if isinstance(location, dict) else {}
+        location["id"] = str(location.get("id") or "L1")
+        normalized_locations.append(location)
+    provider["locations"] = normalized_locations
 
     order_obj = {
         "provider": provider,
@@ -717,6 +774,23 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
             for key in ["phone", "email"]:
                 if not cnt.get(key):
                     errors.append(f"Fulfillment[{idx}] missing start.contact.{key}")
+
+            end = f.get("end", {})
+            end_loc = end.get("location", {})
+            if not end_loc.get("id"):
+                errors.append(f"Fulfillment[{idx}] missing end.location.id")
+            if not end_loc.get("descriptor", {}).get("name"):
+                errors.append(f"Fulfillment[{idx}] missing end.location.descriptor.name")
+            if not end_loc.get("gps"):
+                errors.append(f"Fulfillment[{idx}] missing end.location.gps")
+            end_addr = end_loc.get("address", {})
+            for key in ["locality", "city", "area_code", "state"]:
+                if not end_addr.get(key):
+                    errors.append(f"Fulfillment[{idx}] missing end.location.address.{key}")
+            end_cnt = end.get("contact", {})
+            for key in ["phone", "email"]:
+                if not end_cnt.get(key):
+                    errors.append(f"Fulfillment[{idx}] missing end.contact.{key}")
 
     # 5. Settlement details validation
     payment = order.get("payment", {})

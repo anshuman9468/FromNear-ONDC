@@ -66,6 +66,9 @@ def test_catalog_normalizer_supplies_bpp_descriptor_and_food_statutory_data():
     assert isinstance(descriptor["images"], list)
     statutory = catalog["bpp/providers"][0]["items"][0]["@ondc/org/statutory_reqs_prepackaged_food"]
     assert all(isinstance(value, str) and value for value in statutory.values())
+    location_range = catalog["bpp/providers"][0]["locations"][0]["time"]["range"]
+    assert location_range["start"].endswith("Z")
+    assert location_range["end"].endswith("Z")
 
 
 def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_location():
@@ -93,12 +96,17 @@ def test_quote_breakup_items_use_ret10_quote_tag_vocabulary():
     quote = build_canonical_quote([{"id": "I1", "quantity": {"count": 1}}])
     for breakup in quote["breakup"]:
         item = breakup["item"]
-        if breakup.get("@ondc/org/title_type") == "item":
-            assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
-            assert isinstance(item["tags"], list) and item["tags"]
-            assert item["tags"][0]["code"] in {"quote", "type"}
-            assert item["tags"][0]["list"][0]["code"] == "type"
-            assert item["tags"][0]["list"][0]["value"] in {"fulfillment", "order", "item", "customization"}
+        assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
+        assert isinstance(item["tags"], list) and item["tags"]
+        assert item["tags"][0]["code"] == "quote"
+        assert item["tags"][0]["list"][0]["code"] == "type"
+        assert item["tags"][0]["list"][0]["value"] in {"fulfillment", "order", "item"}
+        assert isinstance(item["quantity"], dict)
+        assert isinstance(item["price"], dict)
+
+        if breakup.get("@ondc/org/title_type") == "delivery":
+            assert item["id"] == "F1"
+            assert item["tags"][0]["list"][0]["value"] == "fulfillment"
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():
@@ -115,6 +123,16 @@ def test_canonical_order_is_complete_for_every_order_callback_action():
         )
         payload = {"context": {**CONTEXT, "action": action}, "message": {"order": order}}
         assert validate_ret10_payload(action, payload) == []
+
+
+def test_callback_context_always_identifies_registered_bpp():
+    client = BppNetworkClient()
+    context = client._create_response_context(
+        {**CONTEXT, "bpp_id": "workbench.ondc.tech", "bpp_uri": "https://wrong.example/ondc"},
+        "on_select",
+    )
+    assert context["bpp_id"] == "ondc.fromnear.com"
+    assert context["bpp_uri"] == "https://ondc.fromnear.com/api/v1/ondc"
 
 
 def test_bpp_lookup_aliases_return_protocol_key_arrays():
