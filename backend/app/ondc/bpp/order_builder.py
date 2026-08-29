@@ -844,35 +844,35 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if not isinstance(item, dict):
             errors.append(f"Quote breakup[{idx}] missing item object")
             continue
-        title_type = entry.get("@ondc/org/title_type")
-        if title_type == "item":
-            if not isinstance(item.get("parent_item_id"), str) or not item.get("parent_item_id"):
-                errors.append(f"Quote breakup[{idx}].item missing parent_item_id string")
-            if "tags" in item and not isinstance(item.get("tags"), list):
-                errors.append(f"Quote breakup[{idx}].item tags must be an array")
-            elif isinstance(item.get("tags"), list):
-                allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
-                allowed_quote_type_values = {"item", "customization"}
-                for tag_idx, tag in enumerate(item.get("tags", [])):
-                    tag_code = tag.get("code") if isinstance(tag, dict) else None
-                    if tag_code not in allowed_quote_tag_codes:
-                        errors.append(
-                            f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
-                        )
-                    if tag_code == "type":
-                        for list_idx, list_item in enumerate(tag.get("list", [])):
-                            if (
-                                isinstance(list_item, dict)
-                                and list_item.get("code") == "type"
-                                and list_item.get("value") not in allowed_quote_type_values
-                            ):
-                                errors.append(
-                                    f"Quote breakup[{idx}].item.tags[{tag_idx}].list[{list_idx}].value must be one of {sorted(allowed_quote_type_values)}"
-                                )
-            if not item.get("price"):
-                errors.append(f"Quote breakup[{idx}].item missing price object")
-            if not item.get("quantity"):
-                errors.append(f"Quote breakup[{idx}].item missing quantity object")
+        # Workbench validates nested `item` objects for every breakup line,
+        # including delivery and fee lines, not only product lines.
+        if not isinstance(item.get("parent_item_id"), str) or not item.get("parent_item_id"):
+            errors.append(f"Quote breakup[{idx}].item missing parent_item_id string")
+        if "tags" in item and not isinstance(item.get("tags"), list):
+            errors.append(f"Quote breakup[{idx}].item tags must be an array")
+        elif isinstance(item.get("tags"), list):
+            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
+            allowed_quote_type_values = {"item", "customization"}
+            for tag_idx, tag in enumerate(item.get("tags", [])):
+                tag_code = tag.get("code") if isinstance(tag, dict) else None
+                if tag_code not in allowed_quote_tag_codes:
+                    errors.append(
+                        f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
+                    )
+                if tag_code == "type":
+                    for list_idx, list_item in enumerate(tag.get("list", [])):
+                        if (
+                            isinstance(list_item, dict)
+                            and list_item.get("code") == "type"
+                            and list_item.get("value") not in allowed_quote_type_values
+                        ):
+                            errors.append(
+                                f"Quote breakup[{idx}].item.tags[{tag_idx}].list[{list_idx}].value must be one of {sorted(allowed_quote_type_values)}"
+                            )
+        if not item.get("price"):
+            errors.append(f"Quote breakup[{idx}].item missing price object")
+        if not item.get("quantity"):
+            errors.append(f"Quote breakup[{idx}].item missing quantity object")
 
     # 9. Payment settlement validation
     settlements = payment.get("@ondc/org/settlement_details", [])
