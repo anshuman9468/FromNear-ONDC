@@ -3,7 +3,6 @@ import logging
 import asyncio
 import copy
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from app.core.settings import settings
 from app.ondc.bpp.client import bpp_client
@@ -46,12 +45,8 @@ DEFAULT_ITEM_TAGS = [
 
 
 def _catalog_hours_range() -> dict:
-    """Return the RFC3339 operating-hours range required by the core schema."""
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    return {
-        "start": today.replace(hour=9).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "end": today.replace(hour=21).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-    }
+    """Return RET10 operating hours in the schema's HHmm format."""
+    return {"start": "0900", "end": "2100"}
 
 
 def _stringify_statutory_fields(statutory: dict) -> dict:
@@ -311,7 +306,9 @@ def _is_incremental_push(payload: dict) -> bool:
     return False
 
 
-def _is_custom_menu_push_flow() -> bool:
+def _is_custom_menu_push_flow(payload: dict | None = None) -> bool:
+    if _is_incremental_push(payload or {}):
+        return True
     return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {
         "custom_menu_push",
         "incremental_push",
@@ -375,26 +372,21 @@ class BppSearchService:
 
         normalized_catalog = _make_incremental_catalog(self.mock_catalog, search_count)
 
-        if _is_custom_menu_push_flow():
+        if _is_custom_menu_push_flow(payload):
             # Workbench records the first on_search as the direct response to
             # /search, then accepts the remaining catalog deltas as pushes.
             await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
             push_count = 2 if search_count == 1 else 0
             for _ in range(push_count):
-                await bpp_client.send_unsolicited(context, "on_search", {"catalog": normalized_catalog})
+                # Give Workbench time to commit the preceding callback before
+                # recording the next unsolicited catalog update.
                 await asyncio.sleep(0.5)
-            return
-
-        # The first on_search is the synchronous response paired with /search.
-        # Workbench rejects a push received before that response as having no
-        # matching sync response.  Follow it with two unsolicited catalog deltas.
-        if search_count == 1 and (_is_incremental_push(payload) or _is_incremental_search(payload)):
-            await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
-            for _ in range(2):
                 await bpp_client.send_unsolicited(context, "on_search", {"catalog": normalized_catalog})
-                await asyncio.sleep(0.3)
             return
 
+        # Pull refresh is a pair of synchronous /search -> on_search calls.
+        # Only the explicit custom-menu push mode above emits unsolicited
+        # catalog deltas; sending them here creates out-of-sequence callbacks.
         await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
 
     async def handle_search(self, payload: dict):

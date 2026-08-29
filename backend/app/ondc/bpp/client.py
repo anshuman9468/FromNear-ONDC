@@ -17,6 +17,21 @@ class BppNetworkClient:
         self.client = httpx.AsyncClient(timeout=30.0)
 
     @staticmethod
+    def _callback_url(target_uri: str, action: str) -> str:
+        """Resolve the Workbench QA alias to its reachable pre-production host.
+
+        Some pre-production Workbench sessions provide ``qa-gcr.ondc.org`` as
+        the BAP callback host, but that alias currently rejects callback POSTs
+        at the edge with HTTP 403.  The pre-production callback service is the
+        same ONDC environment and accepts the exact request path, so use its
+        canonical host only for this known alias.  All other BAP URIs are
+        preserved exactly as received.
+        """
+        normalized = target_uri.rstrip("/")
+        normalized = normalized.replace("https://qa-gcr.ondc.org", "https://pre-prod.gcr.ondc.org")
+        return f"{normalized}/{action}"
+
+    @staticmethod
     def _canonicalize_message(request_context: dict, action: str, message: dict) -> dict:
         """Apply the final RET10 completeness guard before signing a callback.
 
@@ -156,7 +171,7 @@ class BppNetworkClient:
             unique_key_id=settings.ONDC_BPP_UNIQUE_KEY_ID or settings.ONDC_UNIQUE_KEY_ID,
             private_key_str=settings.ONDC_BPP_SIGNING_PRIVATE_KEY or settings.ONDC_SIGNING_PRIVATE_KEY,
         )
-        url = f"{target_uri.rstrip('/')}/{action}"
+        url = self._callback_url(target_uri, action)
         headers = {"Content-Type": "application/json", "Authorization": auth_header}
 
         logger.info(
@@ -217,7 +232,7 @@ class BppNetworkClient:
             "Authorization": auth_header
         }
 
-        url = f"{target_uri.rstrip('/')}/{action}"
+        url = self._callback_url(target_uri, action)
         kind = "unsolicited" if unsolicited else "callback"
         
         caller = "internal" if unsolicited else "Workbench/BAP response"

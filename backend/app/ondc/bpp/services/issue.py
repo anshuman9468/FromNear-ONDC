@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from app.core.settings import settings
 from app.ondc.bpp.client import bpp_client
+from app.ondc.bpp.state_machine import lifecycle_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,12 @@ class BppIssueService:
         await bpp_client.send_unsolicited(context, "on_issue_status", {"issue": resolved_issue})
 
     async def handle_issue(self, payload: Dict[str, Any]) -> None:
+        transaction_id = payload.get("context", {}).get("transaction_id", "default_tx")
+        if lifecycle_tracker.get_or_create(transaction_id).get("issue_requests", 0) > 1:
+            logger.info("Accepted final feedback /issue for tx %s without callback", transaction_id)
+            return
         await self.process_issue(payload)
-        logger.info("Accepted /issue for tx %s", payload.get("context", {}).get("transaction_id"))
+        logger.info("Accepted /issue for tx %s", transaction_id)
 
 
 bpp_issue_service = BppIssueService()

@@ -67,8 +67,7 @@ def test_catalog_normalizer_supplies_bpp_descriptor_and_food_statutory_data():
     statutory = catalog["bpp/providers"][0]["items"][0]["@ondc/org/statutory_reqs_prepackaged_food"]
     assert all(isinstance(value, str) and value for value in statutory.values())
     location_range = catalog["bpp/providers"][0]["locations"][0]["time"]["range"]
-    assert location_range["start"].endswith("Z")
-    assert location_range["end"].endswith("Z")
+    assert location_range == {"start": "0900", "end": "2100"}
 
 
 def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_location():

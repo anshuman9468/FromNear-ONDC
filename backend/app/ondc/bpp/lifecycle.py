@@ -62,23 +62,48 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
 
 def is_prepaid_track_flow(transaction_id: str | None = None) -> bool:
     mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
-    return mode in {"prepaid_track", "track", "out_of_stock"} or (
-        transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+    if mode in {"prepaid_track", "track", "out_of_stock"}:
+        return True
+    flow_hint = str(transaction_id or "").lower()
+    return (
+        "prepaid" in flow_hint
+        or "track" in flow_hint
+        or (
+            transaction_id is not None
+            and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+        )
     )
 
 
-def is_buyer_cancel_flow() -> bool:
+def is_buyer_cancel_flow(context: Dict[str, Any] | None = None) -> bool:
     """Buyer cancellation waits for /cancel instead of pushing delivery status."""
-    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {
+    mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
+    if mode in {
         "cancel",
         "buyer_cancel",
         "buyer_cancellation",
-    }
+    }:
+        return True
+
+    flow_hint = str((context or {}).get("transaction_id") or "").lower()
+    if is_rto_flow(context or {}):
+        return False
+    return "buyer_cancel" in flow_hint or "buyer-cancellation" in flow_hint
 
 
 def is_out_of_stock_flow(transaction_id: str | None = None) -> bool:
-    return (settings.ONDC_BPP_FLOW_MODE or "auto").lower() in {"out_of_stock", "oos"} or (
-        transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+    mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
+    if mode in {"out_of_stock", "oos"}:
+        return True
+    flow_hint = str(transaction_id or "").lower()
+    return (
+        "out_of_stock" in flow_hint
+        or "out-of-stock" in flow_hint
+        or "oos" in flow_hint
+        or (
+            transaction_id is not None
+            and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+        )
     )
 
 
@@ -142,7 +167,7 @@ async def push_post_confirm_lifecycle(
     """Push unsolicited lifecycle callbacks required by Pramaan after on_confirm."""
     transaction_id = context.get("transaction_id", "default_tx")
 
-    if is_buyer_cancel_flow():
+    if is_buyer_cancel_flow(context):
         return
 
     if is_rto_flow(context, payload):
@@ -200,9 +225,13 @@ async def push_post_confirm_lifecycle(
     await asyncio.sleep(2.0)
 
     # Workbench return flows expect the full delivery status progression before update.
-    for state_code in PREPAID_STATUS_SEQUENCE:
+    for index, state_code in enumerate(PREPAID_STATUS_SEQUENCE):
         await asyncio.sleep(0.5)
         if lifecycle_tracker.is_cancelled(transaction_id):
+            return
+        # A normal prepaid flow switches to /track after Picked-up.  Stop the
+        # generic delivery loop before it races the direct on_track callback.
+        if lifecycle_tracker.is_track_requested(transaction_id) and index >= 3:
             return
         status_order = build_canonical_order(
             action="on_status",

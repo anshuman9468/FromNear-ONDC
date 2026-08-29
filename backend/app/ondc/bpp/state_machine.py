@@ -17,6 +17,7 @@ class LifecycleTracker:
                 "status_call_count": 0,
                 "update_call_count": 0,
                 "select_call_count": 0,
+                "track_requested": False,
                 "out_of_stock_flow": False,
                 "sent_callbacks": set(),
                 "stored_order": None,
@@ -71,6 +72,19 @@ class LifecycleTracker:
 
     def get_select_count(self, transaction_id: str) -> int:
         return self.get_or_create(transaction_id).get("select_call_count", 0)
+
+    def mark_track_requested(self, transaction_id: str) -> None:
+        self.get_or_create(transaction_id)["track_requested"] = True
+
+    def is_track_requested(self, transaction_id: str) -> bool:
+        return bool(self.get_or_create(transaction_id).get("track_requested"))
+
+    def mark_issue_requested(self, transaction_id: str) -> int:
+        """Count issue requests so the final feedback input stays input-only."""
+        state = self.get_or_create(transaction_id)
+        count = int(state.get("issue_requests", 0)) + 1
+        state["issue_requests"] = count
+        return count
 
     def mark_out_of_stock_flow(self, transaction_id: str) -> None:
         self.get_or_create(transaction_id)["out_of_stock_flow"] = True

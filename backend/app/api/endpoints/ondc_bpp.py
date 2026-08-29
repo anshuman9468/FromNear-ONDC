@@ -15,6 +15,7 @@ from app.ondc.bpp.services.track import bpp_track_service
 from app.ondc.bpp.services.update import bpp_update_service
 from app.ondc.bpp.services.cancel import bpp_cancel_service
 from app.ondc.bpp.services.issue import bpp_issue_service
+from app.ondc.bpp.state_machine import lifecycle_tracker
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -83,6 +84,14 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
             )
 
     order_id = payload.get("message", {}).get("order", {}).get("id", "UNKNOWN")
+    if action == "track":
+        # Mark the request before the delayed handler starts so a concurrent
+        # post-confirm task cannot emit a status after Workbench enters track.
+        lifecycle_tracker.mark_track_requested(context.get("transaction_id", "default_tx"))
+    if action == "issue":
+        # The IGM scenario sends a second issue as final feedback. It must be
+        # acknowledged as input without repeating the initial issue callbacks.
+        lifecycle_tracker.mark_issue_requested(context.get("transaction_id", "default_tx"))
     logger.info(
         f"\n=== LIFECYCLE TRACE INBOUND ===\n"
         f"Timestamp: {context.get('timestamp')}\n"

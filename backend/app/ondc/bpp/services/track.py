@@ -30,14 +30,16 @@ class BppTrackService:
         await bpp_client.send_callback(context, "on_track", response_message)
         lifecycle_tracker.record_callback(transaction_id, "on_track", "active")
 
-        if is_prepaid_track_flow(transaction_id):
-            await push_prepaid_post_track_statuses(
-                context=context,
-                payload=payload,
-                order_id=order_id,
-                created_at=created_at,
-                stored_order=stored_order,
-            )
+        # Every /track flow needs the final delivery statuses.  The endpoint
+        # itself proves this is a tracking scenario; relying on a global mode
+        # incorrectly omitted them for ordinary prepaid flows.
+        await push_prepaid_post_track_statuses(
+            context=context,
+            payload=payload,
+            order_id=order_id,
+            created_at=created_at,
+            stored_order=stored_order,
+        )
 
     async def handle_track(self, payload: dict):
         await self.process_track(payload)
