@@ -45,7 +45,7 @@ DEFAULT_DELIVERY_TAGS = [
 ]
 DEFAULT_QUOTE_ITEM_TAGS = [
     {
-        "code": "type",
+        "code": "quote",
         "list": [
             {"code": "type", "value": "item"},
         ],
@@ -205,14 +205,13 @@ def _build_quote_item_details(
         },
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
-        # The report validator applies the item-tag vocabulary to the nested
-        # quote breakup item. `type` is valid there; `quote` is not.
+        # RET10's breakup item tag uses the `quote` group. Its nested `type`
+        # value identifies whether the line is an order, fulfillment, or item.
         "tags": [{
-            "code": "type",
+            "code": "quote",
             "list": [{
                 "code": "type",
-                # RET10's nested item tag accepts only item/customization.
-                "value": "customization" if quote_type == "fulfillment" else "item",
+                "value": "fulfillment" if quote_type == "fulfillment" else "item",
             }],
         }],
     }
@@ -851,15 +850,15 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if "tags" in item and not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item tags must be an array")
         elif isinstance(item.get("tags"), list):
-            allowed_quote_tag_codes = {"type", "parent", "child", "origin", "veg_nonveg", "custom_group"}
-            allowed_quote_type_values = {"item", "customization"}
+            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
+            allowed_quote_type_values = {"fulfillment", "order", "item"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "type":
+                if tag_code == "quote":
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)

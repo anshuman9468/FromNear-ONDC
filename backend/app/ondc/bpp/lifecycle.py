@@ -206,7 +206,15 @@ async def push_post_confirm_lifecycle(
             lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)
         return
 
-    # All flows expect an unsolicited on_status with Pending immediately after confirm.
+    # Give a buyer-side /cancel a chance to arrive before starting the generic
+    # delivery-status stream. The cancellation scenario does not permit an
+    # unsolicited on_status between on_confirm and on_cancel.
+    await asyncio.sleep(5.0)
+    if lifecycle_tracker.is_cancelled(transaction_id):
+        return
+
+    # All non-cancellation flows expect an unsolicited on_status with Pending
+    # after confirm.
     pending_order = build_canonical_order(
         action="on_status",
         payload=payload,

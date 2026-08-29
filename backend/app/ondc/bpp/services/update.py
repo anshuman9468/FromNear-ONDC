@@ -82,8 +82,14 @@ class BppUpdateService:
             raise ValueError(f"RET10 Schema Error: {errors}")
 
         lifecycle_tracker.store_order(transaction_id, order_obj, context, created_at, order_id)
-        await bpp_client.send_callback(context, "on_update", response_message)
-        lifecycle_tracker.record_callback(transaction_id, "on_update", state_code)
+
+        # The first buyer-return update is a direct response.  The second
+        # Workbench update is completed by the final unsolicited callback
+        # below; sending both here and below creates an extra out-of-sequence
+        # on_update after the scenario's final step.
+        if update_count == 1:
+            await bpp_client.send_callback(context, "on_update", response_message)
+            lifecycle_tracker.record_callback(transaction_id, "on_update", state_code)
 
         if update_count == 1:
             for followup_state in ("Return-Approved", "Return-Picked"):

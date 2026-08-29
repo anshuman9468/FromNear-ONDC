@@ -301,7 +301,10 @@ def _is_incremental_push(payload: dict) -> bool:
     for tag in intent.get("tags", []):
         if tag.get("code") in ("catalog_inc", "bap_terms"):
             for entry in tag.get("list", []):
-                if entry.get("code") == "mode" and entry.get("value") == "inc":
+                # Flow 8C brackets the push sequence with mode=start/stop.
+                # Do not classify the separate pull-refresh mode=inc flow as
+                # push.
+                if entry.get("code") == "mode" and entry.get("value") in {"start", "stop"}:
                     return True
     return False
 
@@ -375,6 +378,11 @@ class BppSearchService:
         if _is_custom_menu_push_flow(payload):
             # Workbench records the first on_search as the direct response to
             # /search, then accepts the remaining catalog deltas as pushes.
+            # The final Workbench search only verifies the pushed catalog; it
+            # does not have an on_search response step. Sending another
+            # callback there creates an out-of-sequence event.
+            if search_count > 1:
+                return
             await bpp_client.send_callback(context, "on_search", {"catalog": normalized_catalog})
             push_count = 2 if search_count == 1 else 0
             for _ in range(push_count):

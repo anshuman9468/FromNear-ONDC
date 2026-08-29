@@ -1,9 +1,12 @@
+import asyncio
+from unittest.mock import AsyncMock, patch
+
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.ondc.bpp.client import BppNetworkClient
 from app.ondc.bpp.order_builder import build_canonical_order, build_canonical_quote, validate_ret10_payload
-from app.ondc.bpp.services.search import _normalize_catalog_quantities
+from app.ondc.bpp.services.search import BppSearchService, _is_incremental_push, _normalize_catalog_quantities
 from app.ondc.bpp.state_machine import LifecycleTracker
 
 
@@ -91,21 +94,51 @@ def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_locatio
     assert isinstance(item["tags"], list)
 
 
+def test_incremental_push_mode_is_detected_and_does_not_answer_final_search():
+    payload = {
+        "context": {**CONTEXT, "action": "search"},
+        "message": {
+            "intent": {
+                "tags": [{"code": "catalog_inc", "list": [{"code": "mode", "value": "start"}]}]
+            }
+        },
+    }
+    assert _is_incremental_push(payload) is True
+
+    service = BppSearchService()
+    stop_payload = {
+        **payload,
+        "message": {
+            "intent": {
+                "tags": [{"code": "catalog_inc", "list": [{"code": "mode", "value": "stop"}]}]
+            }
+        },
+    }
+    assert _is_incremental_push(stop_payload) is True
+    with patch("app.ondc.bpp.services.search.bpp_client.send_callback", new_callable=AsyncMock) as callback, \
+            patch("app.ondc.bpp.services.search.bpp_client.send_unsolicited", new_callable=AsyncMock) as unsolicited:
+        asyncio.run(service.process_search(payload))
+        asyncio.run(service.process_search(stop_payload))
+
+    assert callback.await_count == 1
+    assert unsolicited.await_count == 2
+
+
 def test_quote_breakup_items_use_ret10_quote_tag_vocabulary():
     quote = build_canonical_quote([{"id": "I1", "quantity": {"count": 1}}])
     for breakup in quote["breakup"]:
         item = breakup["item"]
         assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
         assert isinstance(item["tags"], list) and item["tags"]
-        assert item["tags"][0]["code"] == "type"
+        assert item["tags"][0]["code"] == "quote"
         assert item["tags"][0]["list"][0]["code"] == "type"
-        assert item["tags"][0]["list"][0]["value"] in {"item", "customization"}
+        assert item["tags"][0]["list"][0]["value"] in {"fulfillment", "order", "item"}
         assert isinstance(item["quantity"], dict)
         assert isinstance(item["price"], dict)
 
         if breakup.get("@ondc/org/title_type") == "delivery":
             assert item["id"] == "F1"
-            assert item["tags"][0]["list"][0]["value"] == "customization"
+            assert item["tags"][0]["list"][0]["value"] == "fulfillment"
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():
