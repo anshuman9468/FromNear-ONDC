@@ -43,9 +43,10 @@ def _money(value: Any, default: str = "0.00") -> str:
 
 
 def _ret10_quote_tags(kind: str) -> List[Dict[str, Any]]:
-    # RET10 quote breakup items use the quote tag namespace. The nested type
-    # value distinguishes a product line from a fulfillment charge.
-    return [{"code": "quote", "list": [{"code": "type", "value": kind}]}]
+    # The RET10 report validator applies the item-tag vocabulary to nested
+    # quote breakup items. Use only the accepted type/customization values.
+    value = "customization" if kind == "fulfillment" else "item"
+    return [{"code": "type", "list": [{"code": "type", "value": value}]}]
 
 
 def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
