@@ -44,3 +44,9 @@ Header Validation: OFF is a Workbench session setting only. Production signature
 - `/api/v1/health` returned `healthy` with a healthy database.
 - `/api/v1/diagnostics/ondc` confirms the configured BPP private key derives the configured BPP signing public key and payload preflight passes.
 - The official pre-production registry still returns HTTP 401 with error `15040 Subscriber not found` for the seller key. This remains an onboarding/registry state blocker and is not resolved by changing JSON payloads or callback code.
+
+## Seller Key ID Correction
+
+- The deployed BPP key ID was corrected from the mistyped `490ba36f...` to `490ba361-51d0-49b7-8c00-182892758de9` in Cloud Run revision `fromnear-ondc-backend-00338-bk5`.
+- The buyer key ID remains unchanged.
+- Diagnostics still report signature and payload preflight PASS, but the official registry returns `15040 Subscriber not found` for the corrected seller ID. Registration/subscription is still required.

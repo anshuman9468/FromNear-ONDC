@@ -116,3 +116,11 @@ Regressions: none observed
 
 Next iteration objective:
 - After registry subscription and propagation, create a fresh Seller RET10 Grocery session, disable Header Validation in Workbench, run all applicable flows, download the report, and parse every failure.
+
+## Deployment Correction: Seller Unique Key ID
+
+Deployment revision: `fromnear-ondc-backend-00338-bk5` (100% traffic)
+Seller key ID configured: `490ba361-51d0-49b7-8c00-182892758de9`
+Buyer key ID unchanged: `8c5c6504-113b-4150-acb0-6e2577c972ca`
+
+The previous deployment used `490ba36f...` with a letter `f`; it was corrected to the user-confirmed `490ba361...` with the digit `1`. Health, signature derivation, callback routes, and payload preflight remain PASS. The official registry still returns `15040 Subscriber not found`, so the corrected seller key must be registered/subscribed before rerunning Workbench.
