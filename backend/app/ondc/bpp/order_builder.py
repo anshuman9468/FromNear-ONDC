@@ -205,8 +205,8 @@ def _build_quote_item_details(
         },
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
-        # RET10's breakup item tag uses the `quote` group. Its nested `type`
-        # value identifies whether the line is an order, fulfillment, or item.
+        # RET10 validates quote.breakup[*].item.tags with the quote-tag
+        # vocabulary. The nested type identifies the quote line kind.
         "tags": [{
             "code": "quote",
             "list": [{

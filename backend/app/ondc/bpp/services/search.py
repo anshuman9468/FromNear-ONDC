@@ -45,7 +45,7 @@ DEFAULT_ITEM_TAGS = [
 
 
 def _catalog_hours_range() -> dict:
-    """Return RET10 operating hours in the schema's HHmm format."""
+    """Return the RET10 catalog operating range in the active HHMM format."""
     return {"start": "0900", "end": "2100"}
 
 

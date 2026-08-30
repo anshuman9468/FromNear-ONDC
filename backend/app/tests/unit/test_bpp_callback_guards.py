@@ -71,6 +71,8 @@ def test_catalog_normalizer_supplies_bpp_descriptor_and_food_statutory_data():
     statutory = catalog["bpp/providers"][0]["items"][0]["@ondc/org/statutory_reqs_prepackaged_food"]
     assert all(isinstance(value, str) and value for value in statutory.values())
     location_range = catalog["bpp/providers"][0]["locations"][0]["time"]["range"]
+    assert isinstance(location_range["start"], str)
+    assert isinstance(location_range["end"], str)
     assert location_range == {"start": "0900", "end": "2100"}
 
 
@@ -133,13 +135,41 @@ def test_quote_breakup_items_use_ret10_quote_tag_vocabulary():
         assert isinstance(item["tags"], list) and item["tags"]
         assert item["tags"][0]["code"] == "quote"
         assert item["tags"][0]["list"][0]["code"] == "type"
-        assert item["tags"][0]["list"][0]["value"] in {"fulfillment", "order", "item"}
+        assert item["tags"][0]["list"][0]["value"] in {"item", "fulfillment"}
         assert isinstance(item["quantity"], dict)
         assert isinstance(item["price"], dict)
 
         if breakup.get("@ondc/org/title_type") == "delivery":
             assert item["id"] == "F1"
             assert item["tags"][0]["list"][0]["value"] == "fulfillment"
+
+
+def test_network_guard_rewrites_legacy_quote_tags_from_stored_orders():
+    message = BppNetworkClient._canonicalize_message(
+        CONTEXT,
+        "on_select",
+        {
+            "order": {
+                "items": [{"id": "I1", "quantity": {"count": 1}}],
+                "quote": {
+                    "breakup": [{
+                        "@ondc/org/item_id": "I1",
+                        "@ondc/org/title_type": "item",
+                        "price": {"currency": "INR", "value": "100.00"},
+                        "item": {
+                            "id": "I1",
+                            "parent_item_id": "V1",
+                            "tags": [{"code": "type", "list": [{"code": "type", "value": "item"}]}],
+                        },
+                    }],
+                },
+            },
+        },
+    )
+
+    assert message["order"]["quote"]["breakup"][0]["item"]["tags"] == [
+        {"code": "quote", "list": [{"code": "type", "value": "item"}]}
+    ]
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():
@@ -211,3 +241,11 @@ def test_rto_classification_persists_after_select_marker_is_gone():
     lifecycle_tracker.mark_rto_flow(transaction_id)
 
     assert is_rto_flow({"transaction_id": transaction_id}, {"message": {"order": {}}}) is True
+
+
+def test_lifecycle_tracker_keeps_async_task_handles_out_of_durable_state():
+    tracker = LifecycleTracker()
+    state = tracker.get_or_create("tx-task-local")
+    state["lifecycle_task"] = object()
+
+    assert "lifecycle_task" not in tracker._durable_fields()

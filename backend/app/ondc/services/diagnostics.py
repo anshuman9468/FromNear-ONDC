@@ -16,6 +16,28 @@ from app.ondc.crypto.utils import load_private_key, generate_auth_header, parse_
 
 logger = logging.getLogger(__name__)
 
+
+def _bpp_crypto_config() -> Dict[str, str]:
+    """Return the active seller credentials when BPP credentials are configured."""
+    bpp_private = getattr(settings, "ONDC_BPP_SIGNING_PRIVATE_KEY", None)
+    bpp_public = getattr(settings, "ONDC_BPP_SIGNING_PUBLIC_KEY", None)
+    bpp_key_id = getattr(settings, "ONDC_BPP_UNIQUE_KEY_ID", None)
+    if bpp_private and bpp_public and bpp_key_id:
+        return {
+            "subscriber_id": settings.ONDC_SUBSCRIBER_ID,
+            "unique_key_id": bpp_key_id,
+            "private_key": bpp_private,
+            "public_key": bpp_public,
+            "type": "BPP",
+        }
+    return {
+        "subscriber_id": settings.ONDC_SUBSCRIBER_ID,
+        "unique_key_id": settings.ONDC_UNIQUE_KEY_ID,
+        "private_key": settings.ONDC_SIGNING_PRIVATE_KEY,
+        "public_key": settings.ONDC_SIGNING_PUBLIC_KEY,
+        "type": settings.ONDC_TYPE,
+    }
+
 def validate_search_payload(payload: Dict[str, Any]) -> List[str]:
     """Validate ONDC v1.2 search payload schema and constraints."""
     errors = []
@@ -200,6 +222,7 @@ async def verify_public_domains() -> Dict[str, Any]:
 
 async def run_diagnostics() -> Dict[str, Any]:
     """Execute complete ONDC diagnostics checks and return a unified PASS/FAIL report."""
+    crypto = _bpp_crypto_config()
     report = {
         "configuration": "FAIL",
         "registry": "FAIL",
@@ -218,13 +241,13 @@ async def run_diagnostics() -> Dict[str, Any]:
         "ONDC_SUBSCRIBER_URI": settings.ONDC_SUBSCRIBER_URI,
         "ONDC_GATEWAY_URL": settings.ONDC_GATEWAY_URL,
         "ONDC_REGISTRY_URL": settings.ONDC_REGISTRY_URL,
-        "ONDC_UNIQUE_KEY_ID": settings.ONDC_UNIQUE_KEY_ID,
         "ONDC_DOMAIN": settings.ONDC_DOMAIN,
         "ONDC_COUNTRY": settings.ONDC_COUNTRY,
         "ONDC_CITY": settings.ONDC_CITY,
         "ONDC_VERSION": settings.ONDC_VERSION,
-        "ONDC_SIGNING_PUBLIC_KEY": settings.ONDC_SIGNING_PUBLIC_KEY,
-        "ONDC_ENC_PUBLIC_KEY": settings.ONDC_ENC_PUBLIC_KEY,
+        "ONDC_SIGNING_PUBLIC_KEY": crypto["public_key"],
+        "ONDC_UNIQUE_KEY_ID": crypto["unique_key_id"],
+        "ONDC_PARTICIPANT_TYPE": crypto["type"],
     }
     
     # Check for empty/default values
@@ -254,8 +277,8 @@ async def run_diagnostics() -> Dict[str, Any]:
 
     # 2. Signature and Key Validation
     sig_details = {}
-    priv_key_str = settings.ONDC_SIGNING_PRIVATE_KEY
-    pub_key_str = settings.ONDC_SIGNING_PUBLIC_KEY
+    priv_key_str = crypto["private_key"]
+    pub_key_str = crypto["public_key"]
 
     try:
         if not priv_key_str:
@@ -264,24 +287,29 @@ async def run_diagnostics() -> Dict[str, Any]:
         else:
             priv_key = load_private_key(priv_key_str)
             pub_derived = priv_key.public_key()
-            pub_derived_bytes = pub_derived.public_bytes(
-                encoding=serialization.Encoding.DER,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            raw_bytes = pub_derived.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
             )
-            pub_derived_b64 = base64.b64encode(pub_derived_bytes).decode("utf-8")
+            der_bytes = pub_derived.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            raw_b64 = base64.b64encode(raw_bytes).decode("utf-8")
+            der_b64 = base64.b64encode(der_bytes).decode("utf-8")
             
             sig_details["private_key_readable"] = True
-            sig_details["derived_public_key"] = pub_derived_b64
+            sig_details["derived_public_key"] = raw_b64
             sig_details["configured_public_key"] = pub_key_str
             
-            if pub_derived_b64.strip() == pub_key_str.strip():
+            if pub_key_str.strip() in {raw_b64, der_b64}:
                 report["signature"] = "PASS"
                 sig_details["match"] = True
             else:
                 report["signature"] = "FAIL"
                 sig_details["match"] = False
-                sig_details["error"] = "Derived public key does not match configured ONDC_SIGNING_PUBLIC_KEY"
-                report["recommendations"].append("Mismatched ONDC_SIGNING_PRIVATE_KEY and ONDC_SIGNING_PUBLIC_KEY in .env.")
+                sig_details["error"] = "Derived public key does not match the active configured signing public key"
+                report["recommendations"].append("Mismatched signing private/public key pair for the active participant.")
     except Exception as e:
         report["signature"] = "FAIL"
         sig_details["private_key_readable"] = False
@@ -340,8 +368,9 @@ async def run_diagnostics() -> Dict[str, Any]:
     ]
     
     lookup_payload = {
-        "subscriber_id": settings.ONDC_SUBSCRIBER_ID,
-        "type": "BAP",
+        "subscriber_id": crypto["subscriber_id"],
+        "unique_key_id": crypto["unique_key_id"],
+        "type": crypto["type"],
         "domain": settings.ONDC_DOMAIN
     }
     
@@ -355,9 +384,9 @@ async def run_diagnostics() -> Dict[str, Any]:
             content_bytes = json.dumps(lookup_payload, separators=(',', ':')).encode("utf-8")
             auth_header = generate_auth_header(
                 body=content_bytes,
-                subscriber_id=settings.ONDC_SUBSCRIBER_ID,
-                unique_key_id=settings.ONDC_UNIQUE_KEY_ID,
-                private_key_str=settings.ONDC_SIGNING_PRIVATE_KEY
+                subscriber_id=crypto["subscriber_id"],
+                unique_key_id=crypto["unique_key_id"],
+                private_key_str=crypto["private_key"]
             )
             headers["Authorization"] = auth_header
         except Exception as sign_err:

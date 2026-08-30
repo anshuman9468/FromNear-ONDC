@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     ONDC_BPP_ENC_PUBLIC_KEY: Optional[str] = None
     ONDC_BPP_UNIQUE_KEY_ID: Optional[str] = None
     ONDC_BPP_FLOW_MODE: str = "auto"
+    # Cross-instance lifecycle correlation is required when Cloud Run scales
+    # beyond one instance. It is opt-in locally and enabled in production.
+    ONDC_BPP_DURABLE_STATE: bool = False
 
     ONDC_VERIFY_SIGNATURES: bool = True
 

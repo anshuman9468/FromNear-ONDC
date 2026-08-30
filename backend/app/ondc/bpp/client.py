@@ -84,6 +84,20 @@ class BppNetworkClient:
             stored_order=order,
             order_state=order.get("state"),
         )
+        # Keep the wire contract authoritative even when a stored order was
+        # created by an older process. Historical orders can still contain an
+        # invalid item-tag group; Workbench requires the quote-tag group here.
+        for breakup in canonical.get("quote", {}).get("breakup", []):
+            if not isinstance(breakup, dict) or not isinstance(breakup.get("item"), dict):
+                continue
+            quote_kind = "fulfillment" if breakup.get("@ondc/org/title_type") == "delivery" else "item"
+            breakup["item"]["tags"] = [{
+                "code": "quote",
+                "list": [{
+                    "code": "type",
+                    "value": "fulfillment" if quote_kind == "fulfillment" else "item",
+                }],
+            }]
         # Lifecycle-specific fields are not part of the generic order builder.
         if isinstance(order.get("cancellation"), dict):
             canonical["cancellation"] = order["cancellation"]

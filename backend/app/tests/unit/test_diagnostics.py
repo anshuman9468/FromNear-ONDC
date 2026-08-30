@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
-from app.ondc.services.diagnostics import validate_search_payload, run_diagnostics
+from app.ondc.services.diagnostics import _bpp_crypto_config, validate_search_payload, run_diagnostics
 from app.core.settings import settings
 
 def test_validate_search_payload_valid():
@@ -66,6 +66,17 @@ def test_validate_search_payload_invalid():
         assert "must be 'search'" in err_str
         assert "core_version" in err_str
         assert "Missing required root key: 'message'" in err_str
+
+
+def test_diagnostics_prefers_registered_bpp_credentials_when_available():
+    with patch.object(settings, "ONDC_BPP_SIGNING_PRIVATE_KEY", "seller-private"), \
+         patch.object(settings, "ONDC_BPP_SIGNING_PUBLIC_KEY", "seller-public"), \
+         patch.object(settings, "ONDC_BPP_UNIQUE_KEY_ID", "seller-key-id"):
+        crypto = _bpp_crypto_config()
+
+    assert crypto["type"] == "BPP"
+    assert crypto["unique_key_id"] == "seller-key-id"
+    assert crypto["public_key"] == "seller-public"
 
 def test_run_diagnostics_flow():
     """Test that run_diagnostics executes all modules and compiles a report."""

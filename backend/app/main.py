@@ -36,10 +36,21 @@ def validate_ondc_config() -> None:
         logger.critical(error_msg)
         raise ValueError(error_msg)
 
+
+def ensure_bpp_lifecycle_state_table() -> None:
+    """Create the correlation table for deployments not running Alembic."""
+    if not settings.ONDC_BPP_DURABLE_STATE:
+        return
+    from app.core.database import engine
+    from app.models.bpp_lifecycle_state import BppLifecycleState
+
+    BppLifecycleState.__table__.create(bind=engine, checkfirst=True)
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Application lifespan: startup validation + clean shutdown of HTTP client."""
     validate_ondc_config()
+    ensure_bpp_lifecycle_state_table()
     logger.info("ONDC Buyer BAP started successfully.")
     yield
     # Graceful shutdown: close shared httpx client
