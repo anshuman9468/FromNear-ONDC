@@ -291,3 +291,66 @@ Diagnostics: configuration, signature derivation, callback route, and payload pr
 Git commit: `8e29a26` pushed to `origin/main`.
 
 The Workbench session `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y` was executed before this final deployment and already verified seven independent green flows. The remaining Return/RTO failures are Workbench mock requests rejected with `subscriberID not set` before reaching the Seller endpoint; they require a fresh valid Workbench mock request for final certification.
+
+## Iteration 8: Contract-aligned active BPP diagnostics
+
+Session ID: `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y` (existing evidence; no new Workbench report generated)
+Deployment revision: Pending deployment of this diagnostics-only correction
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Contract review:
+- The Retail 1.2.0 contract defines `keyId` as `subscriber_id|unique_key_id|algorithm`; registry lookup and signature verification therefore use participant identity and registered keys, not payment data.
+- Settlement details are a separate payment structure. For `settlement_type: upi`, `upi_address` is required; this cannot repair a missing transport/request `subscriberID` in a Workbench mock update.
+- The contract identifies `/update` as the buyer-initiated part return/cancel request and `/on_update` as the Seller response or Seller-initiated part cancellation.
+
+Code changes:
+- Diagnostics now compares registry `ukId`, signing key, and encryption key against the active BPP credential set when seller credentials are configured.
+- Diagnostics now signs its gateway probe with the same active BPP credentials used for registry lookup.
+- `verify_preprod_registration.py` now reports the active credential set and the configured callback URI instead of the Buyer key/obsolete `.app` URL.
+
+Verification:
+- Full application suite: `52 passed`.
+- RET10 lifecycle dry run: 12 callback payloads passed.
+- Buyer cancellation dry run: passed.
+- Catalog audit: all six checks passed.
+
+Deployment verification:
+- Cloud Run revision `fromnear-ondc-backend-00357-tsd` is ready and serves 100% traffic.
+- `/api/v1/health` reports healthy database/service status.
+- Live diagnostics reports `configuration=PASS`, `registry=PASS`, `gateway=PASS`, `signature=PASS`, `subscriber=PASS`, `callback=PASS`, and `payload=PASS`.
+- Registry lookup returned the subscribed BPP record for `ondc.fromnear.com`, Seller key ID `490ba361-51d0-49b7-8c00-182892758de9`, and callback `https://ondc.fromnear.com/api/v1/ondc`.
+
+Remote certification status:
+- This confirms the deployed participant identity and diagnostics probes, but it is not a new clean Workbench/Pramaan report. The last Workbench evidence still had Return/RTO blocked by malformed mock `update` requests with `subscriberID not set` before BPP delivery.
+
+Next iteration objective:
+- Start a fresh Seller Workbench session against revision `00357-tsd`, keep Header Validation OFF, run all applicable flows, and generate a fresh report. Treat any remaining malformed mock update as a Workbench blocker, not a Seller payload failure.
+
+Remote status:
+- The prior fresh session had seven independent green flows.
+- Return and RTO remain blocked at Workbench mock `update` with `subscriberID not set`; no `/update` request reached the Seller service, so payment fields cannot resolve that blocker.
+
+Next iteration objective:
+- Deploy this diagnostics correction, verify the active Cloud Run revision and health, then create a fresh Seller Workbench session with a valid update mock before final certification.
+
+## Iteration 9: Contract-correct registry and gateway probes
+
+Deployment revision: Pending deployment of this correction
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Live probe findings:
+- The registry returned `15050 JSON Request Invalid format` because the diagnostics request used `unique_key_id`; the contract requires `ukId` and the lookup selectors `country`, `city`, and `type`.
+- The gateway returned `400 Payment is required in intent for search request` because the diagnostics search intent lacked the buyer-app finder-fee payment object.
+
+Code changes:
+- Registry diagnostics now sends the contract-shaped `ukId`, `country`, `city`, and `type` fields.
+- Gateway diagnostics now includes `@ondc/org/buyer_app_finder_fee_type=percent` and `@ondc/org/buyer_app_finder_fee_amount=3` in `message.intent.payment`.
+- Added assertions covering the active BPP registry request and payment-bearing gateway probe.
+
+Verification before deployment:
+- Full application suite: `52 passed`.
+- RET10 lifecycle dry run: 12 callback payloads passed.
+- Buyer cancellation dry run: passed.
+- Catalog audit: all six checks passed.

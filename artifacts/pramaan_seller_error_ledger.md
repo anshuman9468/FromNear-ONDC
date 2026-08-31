@@ -46,6 +46,46 @@ Current session outcome: seven flows completed at 100%; Return and RTO are exter
 - Health endpoint is green and the live diagnostics report Seller signature and payload preflight PASS.
 - The current Workbench session predates this revision, but the deployed source is the same verified implementation. A clean final Workbench report cannot be claimed while Workbench itself rejects Return/RTO mock updates with `subscriberID not set` before BPP delivery.
 
+## Contract audit and diagnostics correction
+
+The active contract source is `ONDC - API Contract for Retail - 1.2.0`. Relevant conclusions:
+
+- `subscriber_id` and `ukId` are participant registry identity fields used in `keyId` and `/lookup`; they are not populated by payment or settlement fields.
+- `@ondc/org/settlement_details` is conditional payment data. When `settlement_type` is `upi`, `upi_address` is required; this is independent of the HTTP/request `subscriberID` that Workbench reported missing.
+- `/update` is the buyer-side part return/cancel request and `/on_update` is the Seller response or Seller-initiated part cancellation callback.
+
+The repository diagnostics had a role consistency bug: lookup used the active BPP credentials, but registry cross-validation and the gateway probe used the base Buyer credentials. This was corrected and covered by the diagnostics test. It does not alter live protocol signing or disable production verification.
+
+## Iteration 8 evidence
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Diagnostics compared BPP registry records with BAP key ID/public key | Pre-production registry diagnostics | 1 misleading result | 0 in local regression | Fixed in source; deployment pending | Diagnostics utility | Compare `ukId`, signing key, and encryption key against the active BPP credential set. |
+| Diagnostics gateway probe signed with BAP credentials while BPP mode was active | Gateway diagnostics | 1 misleading probe | 0 in local regression | Fixed in source; deployment pending | Diagnostics utility | Sign with the same active credential set selected for registry lookup. |
+| Verification script displayed obsolete Buyer/`.app` fallback values | `verify_preprod_registration.py` | 1 misleading operator instruction | 0 in source | Fixed | Verification tooling | Report active BPP credentials and `ONDC_SUBSCRIBER_URI`. |
+
+No new Seller payload or callback schema failure was introduced. The Workbench `subscriberID not set` blocker remains external and occurs before the Seller endpoint.
+
+## Iteration 9 evidence
+
+The live diagnostics probe after revision `00356-kwx` exposed two contract-shape errors in the diagnostics utility itself:
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Registry lookup used `unique_key_id` instead of contract `ukId` and omitted country/city selectors | Registry diagnostics | 1 | 0 in source tests | Fixed in source; deployment pending | Diagnostics utility | Send `subscriber_id`, `domain`, `ukId`, `country`, `city`, and `type`. |
+| Gateway diagnostic search intent omitted payment | Gateway diagnostics | 1 | 0 in source tests | Fixed in source; deployment pending | Diagnostics utility | Include buyer-app finder-fee payment fields required by the active search contract. |
+
+These were diagnostic probe defects, not Seller callback payload defects. The correction makes live diagnostics useful for distinguishing registry onboarding failures from malformed local probes.
+
+## Iteration 9 deployment evidence
+
+- Cloud Run revision `fromnear-ondc-backend-00357-tsd` is ready and serves 100% traffic.
+- Health endpoint is green.
+- Live diagnostics: `configuration=PASS`, `registry=PASS`, `gateway=PASS`, `signature=PASS`, `subscriber=PASS`, `callback=PASS`, `payload=PASS`.
+- The registry returned `SUBSCRIBED` for `ondc.fromnear.com` with Seller key ID `490ba361-51d0-49b7-8c00-182892758de9`, the configured Seller signing/encryption keys, and callback `https://ondc.fromnear.com/api/v1/ondc`.
+
+This closes the registry and diagnostics-tooling blockers observed in earlier iterations. It does not replace final Workbench evidence: a new Seller Workbench session must still execute the Return/RTO update branches with a valid mock request before a zero-failure Pramaan result can be declared.
+
 ## Iteration 5: Contract-aligned breakup tag boundary
 
 - Contract source reviewed: [ONDC API contract](https://docs.google.com/document/d/1brvcltG_DagZ3kGr1ZZQk4hG4tze3zvcxmGV4NMTzr8/edit), including the RET10 1.2.0 examples.

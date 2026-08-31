@@ -71,17 +71,23 @@ def test_validate_search_payload_invalid():
 def test_diagnostics_prefers_registered_bpp_credentials_when_available():
     with patch.object(settings, "ONDC_BPP_SIGNING_PRIVATE_KEY", "seller-private"), \
          patch.object(settings, "ONDC_BPP_SIGNING_PUBLIC_KEY", "seller-public"), \
+         patch.object(settings, "ONDC_BPP_ENC_PUBLIC_KEY", "seller-encryption-public"), \
          patch.object(settings, "ONDC_BPP_UNIQUE_KEY_ID", "seller-key-id"):
         crypto = _bpp_crypto_config()
 
     assert crypto["type"] == "BPP"
     assert crypto["unique_key_id"] == "seller-key-id"
     assert crypto["public_key"] == "seller-public"
+    assert crypto["encryption_public_key"] == "seller-encryption-public"
 
 def test_run_diagnostics_flow():
     """Test that run_diagnostics executes all modules and compiles a report."""
     async def run():
-        with patch("app.ondc.services.diagnostics.load_private_key") as mock_load_priv, \
+        with patch.object(settings, "ONDC_BPP_SIGNING_PRIVATE_KEY", "seller-private"), \
+             patch.object(settings, "ONDC_BPP_SIGNING_PUBLIC_KEY", "ZGVyaXZlZC1rZXktYnl0ZXM="), \
+             patch.object(settings, "ONDC_BPP_ENC_PUBLIC_KEY", "seller-encryption-public"), \
+             patch.object(settings, "ONDC_BPP_UNIQUE_KEY_ID", "seller-key-id"), \
+             patch("app.ondc.services.diagnostics.load_private_key") as mock_load_priv, \
              patch("app.ondc.services.diagnostics.generate_auth_header", return_value="Signature header") as mock_gen, \
              patch("app.ondc.services.diagnostics.parse_auth_header") as mock_parse, \
              patch("httpx.AsyncClient.post") as mock_post, \
@@ -102,21 +108,22 @@ def test_run_diagnostics_flow():
             }
             
             # Mock registry lookup and gateway responses
-            mock_registry_res = AsyncMock()
+            mock_registry_res = MagicMock()
             mock_registry_res.status_code = 200
             mock_registry_res.headers = {"content-type": "application/json"}
             mock_registry_res.json.return_value = [
                 {
                     "subscriber_id": settings.ONDC_SUBSCRIBER_ID,
                     "status": "SUBSCRIBED",
-                    "signing_public_key": settings.ONDC_SIGNING_PUBLIC_KEY,
-                    "enc_public_key": settings.ONDC_ENC_PUBLIC_KEY,
+                    "ukId": "seller-key-id",
+                    "signing_public_key": "ZGVyaXZlZC1rZXktYnl0ZXM=",
+                    "enc_public_key": "seller-encryption-public",
                     "subscriber_url": settings.ONDC_SUBSCRIBER_URI
                 }
             ]
             mock_registry_res.text = "[]"
             
-            mock_gateway_res = AsyncMock()
+            mock_gateway_res = MagicMock()
             mock_gateway_res.status_code = 200
             mock_gateway_res.headers = {"content-type": "application/json"}
             mock_gateway_res.text = "ACK"
@@ -136,5 +143,16 @@ def test_run_diagnostics_flow():
             assert "gateway" in report
             assert "details" in report
             assert "recommendations" in report
+            assert report["details"]["configuration"]["values"]["active_credential_set"] == "BPP"
+            assert mock_gen.call_count >= 2
+            assert all(call.kwargs["unique_key_id"] == "seller-key-id" for call in mock_gen.call_args_list)
+            lookup_payload = mock_post.call_args_list[0].kwargs["content"]
+            assert b'"ukId":"seller-key-id"' in lookup_payload
+            assert b'"country":"IND"' in lookup_payload
+            assert b'"city":"std:080"' in lookup_payload
+            assert report["details"]["payload"]["validated_payload"]["message"]["intent"]["payment"] == {
+                "@ondc/org/buyer_app_finder_fee_type": "percent",
+                "@ondc/org/buyer_app_finder_fee_amount": "3",
+            }
 
     asyncio.run(run())

@@ -9,7 +9,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from app.core.settings import settings
-from app.ondc.services.diagnostics import run_diagnostics
+from app.ondc.services.diagnostics import _bpp_crypto_config, run_diagnostics
 
 # ANSI color codes for pretty printing
 GREEN = "\033[92m"
@@ -20,6 +20,7 @@ RESET = "\033[0m"
 
 async def main():
     report = await run_diagnostics()
+    crypto = _bpp_crypto_config()
     
     sub_data = report["details"].get("subscriber", {})
     reg_data = report["details"].get("registry", {})
@@ -32,9 +33,9 @@ async def main():
     sub_id = cross_val.get("subscriber_id", {}).get("registry") or settings.ONDC_SUBSCRIBER_ID
     sub_url = cross_val.get("subscriber_uri", {}).get("registry") or settings.ONDC_SUBSCRIBER_URI
     status = sub_data.get("status_in_registry") or "NOT_FOUND"
-    uk_id = cross_val.get("unique_key_id", {}).get("registry") or settings.ONDC_UNIQUE_KEY_ID
-    sig_pub = cross_val.get("signing_public_key", {}).get("registry") or settings.ONDC_SIGNING_PUBLIC_KEY
-    enc_pub = sub_data.get("enc_public_key") or settings.ONDC_ENC_PUBLIC_KEY
+    uk_id = cross_val.get("unique_key_id", {}).get("registry") or crypto["unique_key_id"]
+    sig_pub = cross_val.get("signing_public_key", {}).get("registry") or crypto["public_key"]
+    enc_pub = sub_data.get("enc_public_key") or crypto["encryption_public_key"]
     
     found_color = GREEN if found == "YES" else RED
     
@@ -57,14 +58,14 @@ async def main():
     print("The registry could not locate the signing key associated with:")
     print(f"Subscriber ID:\n{RED}{settings.ONDC_SUBSCRIBER_ID}{RESET}")
     print()
-    print(f"Unique Key ID:\n{RED}{settings.ONDC_UNIQUE_KEY_ID}{RESET}")
+    print(f"Unique Key ID:\n{RED}{crypto['unique_key_id']}{RESET}")
     print()
     print(f"{BOLD}Recommended Action:{RESET}")
     print(f"1. Verify participant exists in Pre-Production Registry.")
     print(f"2. Verify Unique Key ID matches ONDC Portal.")
     print(f"3. Verify Signing Public Key matches Registry.")
     print(f"4. Verify participant status is ACTIVE.")
-    print(f"5. Verify callback URL registered is {GREEN}https://ondc.fromnear.app/api/v1/ondc{RESET}")
+    print(f"5. Verify callback URL registered is {GREEN}{settings.ONDC_SUBSCRIBER_URI}{RESET}")
 
 if __name__ == "__main__":
     asyncio.run(main())

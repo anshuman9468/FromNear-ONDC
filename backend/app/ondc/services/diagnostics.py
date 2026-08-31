@@ -28,6 +28,8 @@ def _bpp_crypto_config() -> Dict[str, str]:
             "unique_key_id": bpp_key_id,
             "private_key": bpp_private,
             "public_key": bpp_public,
+            "encryption_public_key": getattr(settings, "ONDC_BPP_ENC_PUBLIC_KEY", None)
+            or settings.ONDC_ENC_PUBLIC_KEY,
             "type": "BPP",
         }
     return {
@@ -35,6 +37,7 @@ def _bpp_crypto_config() -> Dict[str, str]:
         "unique_key_id": settings.ONDC_UNIQUE_KEY_ID,
         "private_key": settings.ONDC_SIGNING_PRIVATE_KEY,
         "public_key": settings.ONDC_SIGNING_PUBLIC_KEY,
+        "encryption_public_key": settings.ONDC_ENC_PUBLIC_KEY,
         "type": settings.ONDC_TYPE,
     }
 
@@ -247,7 +250,9 @@ async def run_diagnostics() -> Dict[str, Any]:
         "ONDC_VERSION": settings.ONDC_VERSION,
         "ONDC_SIGNING_PUBLIC_KEY": crypto["public_key"],
         "ONDC_UNIQUE_KEY_ID": crypto["unique_key_id"],
+        "ONDC_ENC_PUBLIC_KEY": crypto["encryption_public_key"],
         "ONDC_PARTICIPANT_TYPE": crypto["type"],
+        "active_credential_set": crypto["type"],
     }
     
     # Check for empty/default values
@@ -369,9 +374,11 @@ async def run_diagnostics() -> Dict[str, Any]:
     
     lookup_payload = {
         "subscriber_id": crypto["subscriber_id"],
-        "unique_key_id": crypto["unique_key_id"],
+        "domain": settings.ONDC_DOMAIN,
+        "ukId": crypto["unique_key_id"],
+        "country": settings.ONDC_COUNTRY,
+        "city": settings.ONDC_CITY,
         "type": crypto["type"],
-        "domain": settings.ONDC_DOMAIN
     }
     
     registry_details["payload"] = lookup_payload
@@ -464,14 +471,14 @@ async def run_diagnostics() -> Dict[str, Any]:
                         "match": (normalize_val(reg_sub_id) == normalize_val(settings.ONDC_SUBSCRIBER_ID))
                     },
                     "unique_key_id": {
-                        "local": settings.ONDC_UNIQUE_KEY_ID,
+                        "local": crypto["unique_key_id"],
                         "registry": reg_uk_id,
-                        "match": (normalize_val(reg_uk_id) == normalize_val(settings.ONDC_UNIQUE_KEY_ID))
+                        "match": (normalize_val(reg_uk_id) == normalize_val(crypto["unique_key_id"]))
                     },
                     "signing_public_key": {
-                        "local": settings.ONDC_SIGNING_PUBLIC_KEY,
+                        "local": crypto["public_key"],
                         "registry": reg_sig_pub,
-                        "match": (normalize_val(reg_sig_pub) == normalize_val(settings.ONDC_SIGNING_PUBLIC_KEY))
+                        "match": (normalize_val(reg_sig_pub) == normalize_val(crypto["public_key"]))
                     },
                     "subscriber_uri": {
                         "local": settings.ONDC_SUBSCRIBER_URI,
@@ -483,7 +490,10 @@ async def run_diagnostics() -> Dict[str, Any]:
                 
                 enc_key_in_reg = found_sub.get("enc_public_key")
                 subscriber_details["encryption_key_in_registry"] = enc_key_in_reg
-                enc_key_matches = (enc_key_in_reg and enc_key_in_reg.strip() == settings.ONDC_ENC_PUBLIC_KEY.strip())
+                enc_key_matches = (
+                    enc_key_in_reg
+                    and enc_key_in_reg.strip() == crypto["encryption_public_key"].strip()
+                )
                 subscriber_details["encryption_key_matches"] = enc_key_matches
                 
                 if (status_active and 
@@ -563,6 +573,10 @@ async def run_diagnostics() -> Dict[str, Any]:
                 },
                 "fulfillment": {
                     "type": "Delivery"
+                },
+                "payment": {
+                    "@ondc/org/buyer_app_finder_fee_type": "percent",
+                    "@ondc/org/buyer_app_finder_fee_amount": "3"
                 }
             }
         }
@@ -590,14 +604,14 @@ async def run_diagnostics() -> Dict[str, Any]:
             body_bytes = json.dumps(test_payload, separators=(',', ':')).encode("utf-8")
             auth_header = generate_auth_header(
                 body=body_bytes,
-                subscriber_id=settings.ONDC_SUBSCRIBER_ID,
-                unique_key_id=settings.ONDC_UNIQUE_KEY_ID,
-                private_key_str=settings.ONDC_SIGNING_PRIVATE_KEY
+                subscriber_id=crypto["subscriber_id"],
+                unique_key_id=crypto["unique_key_id"],
+                private_key_str=crypto["private_key"]
             )
             
             parsed_header = parse_auth_header(auth_header)
             key_id_val = parsed_header.get("keyId", "")
-            expected_key_id = f"{settings.ONDC_SUBSCRIBER_ID}|{settings.ONDC_UNIQUE_KEY_ID}|ed25519"
+            expected_key_id = f"{crypto['subscriber_id']}|{crypto['unique_key_id']}|ed25519"
             key_id_match = (key_id_val == expected_key_id)
             
             key_id_parts = key_id_val.split("|")
