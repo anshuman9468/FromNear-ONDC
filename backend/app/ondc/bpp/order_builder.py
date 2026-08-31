@@ -190,9 +190,21 @@ def _build_quote_item_details(
     max_count = "5"
     avail_count = "99"
     if catalog_item:
-        quantity = catalog_item.get("quantity") if isinstance(catalog_item.get("quantity"), dict) else {}
-        maximum = quantity.get("maximum") if isinstance(quantity.get("maximum"), dict) else {}
-        available = quantity.get("available") if isinstance(quantity.get("available"), dict) else {}
+        catalog_quantity = (
+            catalog_item.get("quantity")
+            if isinstance(catalog_item.get("quantity"), dict)
+            else {}
+        )
+        maximum = (
+            catalog_quantity.get("maximum")
+            if isinstance(catalog_quantity.get("maximum"), dict)
+            else {}
+        )
+        available = (
+            catalog_quantity.get("available")
+            if isinstance(catalog_quantity.get("available"), dict)
+            else {}
+        )
         max_count = str(maximum.get("count") or 5)
         avail_count = str(available.get("count") or 99)
     return {

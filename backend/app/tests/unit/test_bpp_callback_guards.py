@@ -137,6 +137,7 @@ def test_quote_breakup_items_use_ret10_quote_tag_vocabulary():
         assert item["tags"][0]["list"][0]["code"] == "type"
         assert item["tags"][0]["list"][0]["value"] in {"item", "fulfillment"}
         assert isinstance(item["quantity"], dict)
+        assert isinstance(item["quantity"]["selected"]["count"], int)
         assert isinstance(item["price"], dict)
 
         if breakup.get("@ondc/org/title_type") == "delivery":
@@ -222,6 +223,18 @@ def test_rto_flow_is_detected_from_workbench_order_tags():
             }
         }
     }
+    assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is True
+
+
+def test_rto_flow_is_detected_from_order_level_tags():
+    payload = {
+        "message": {
+            "order": {
+                "tags": [{"code": "rto_action", "list": [{"code": "action", "value": "return"}]}]
+            }
+        }
+    }
+
     assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is True
 
 

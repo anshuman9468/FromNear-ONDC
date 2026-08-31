@@ -124,3 +124,57 @@ Seller key ID configured: `490ba361-51d0-49b7-8c00-182892758de9`
 Buyer key ID unchanged: `8c5c6504-113b-4150-acb0-6e2577c972ca`
 
 The previous deployment used `490ba36f...` with a letter `f`; it was corrected to the user-confirmed `490ba361...` with the digit `1`. Health, signature derivation, callback routes, and payload preflight remain PASS. The official registry still returns `15040 Subscriber not found`, so the corrected seller key must be registered/subscribed before rerunning Workbench.
+
+## Iteration 3: Quote quantity root-cause fix
+
+Session ID: `JFxl8BFnlg05sii2VhU8yLMgbCe-f6Ts` (existing session; not a fresh certification run)
+Deployment revision: `fromnear-ondc-backend-00344-m2f`
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- Cloud Run revision `00344-m2f` is ready, receives traffic, and `/api/v1/health` reports a healthy database.
+- Full local test suite: `50 passed`.
+- Full lifecycle dry run: all 12 callback payloads passed RET10 validation.
+- Existing session showed 100% completion for full catalog, incremental pull, incremental push, buyer cancellation, buyer return, and prepaid fulfillment flows.
+
+Failed or incomplete remote flows:
+- RTO remains incomplete at 86% in the existing session because its terminal unsolicited `on_cancel` was not recorded.
+- Out-of-stock remains incomplete at step 3 in the existing session; the BPP logs showed the earlier callback was HTTP 200/ACK, but Workbench did not advance the second select step.
+- IGM flow remains incomplete at the optional issue branch in the existing session.
+
+Fixed since prior run:
+- Prevented catalog quantity metadata from overwriting the numeric requested quantity while building `quote.breakup[*].item.quantity.selected.count`.
+- Added a regression assertion that every quote breakup selected count is an integer.
+
+Regressions: none in local tests or dry run.
+
+Remaining requirement:
+- A fresh Workbench Seller session and fresh report are required to verify the deployed fix. The current browser automation connection had no user tab, so the existing session was opened in a new controlled tab only for state inspection; no zero-error claim is made from it.
+
+## Iteration 4: RTO detection and Seller helper identity
+
+Session ID: `JFxl8BFnlg05sii2VhU8yLMgbCe-f6Ts` (existing session; not replayed)
+Deployment revision: `fromnear-ondc-backend-00345-d5v` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- Cloud Run revision `00345-d5v` is ready, receives 100% traffic, and `/api/v1/health` reports healthy.
+- Full local test suite: `51 passed`.
+- Full lifecycle dry run: all 12 callback payloads passed RET10 validation.
+
+Failed or incomplete remote flows:
+- Existing RTO flow remains at 86% because it began before revision `00345-d5v`; its old transaction already followed the non-RTO branch and cannot be repaired by replaying cards.
+- Existing Out-of-Stock flow remains at step 3 waiting for Workbench's second mock `/select`; no callback was received for that request.
+- Existing IGM flow stops at the scenario's mock issue branch; this is not evidence of a Seller callback failure.
+
+Fixed since prior run:
+- RTO detection now scans order-level tags as well as item and fulfillment tags.
+- Added regression coverage for order-level `rto_action` markers.
+- Seller helper scripts now send `ondc.fromnear.com` as `bpp_id` and use `https://ondc.fromnear.com/api/v1/ondc` as `bpp_uri`; they no longer send the Workbench Buyer identity as the Seller.
+
+Regressions: none in local tests or dry run.
+
+Next iteration objective:
+- Create a fresh Workbench Seller RET10 Grocery session against revision `00345-d5v`, disable Header Validation in Workbench, run every applicable flow once, and generate a fresh report. Do not reuse the old session for certification.

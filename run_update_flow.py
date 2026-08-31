@@ -4,8 +4,8 @@ import uuid
 
 # Configuration
 BASE_URL = "https://ondc.fromnear.com/api/v1"
-BPP_ID = "workbench.ondc.tech"
-BPP_URI = "https://workbench.ondc.tech/api-service/ONDC:RET10/1.2.0/seller"
+BPP_ID = "ondc.fromnear.com"
+BPP_URI = "https://ondc.fromnear.com/api/v1/ondc"
 
 # Generate new transaction ID
 transaction_id = str(uuid.uuid4())

@@ -58,33 +58,36 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
 
     order = (payload or {}).get("message", {}).get("order", {})
     if isinstance(order, dict):
-        for collection_name in ("items", "fulfillments"):
-            collection = order.get(collection_name, [])
-            if not isinstance(collection, list):
+        # RET10 fixtures may place the merchant-side marker directly on the
+        # order, rather than repeating it on every item/fulfillment.
+        tagged_entries = [{"tags": order.get("tags", [])}]
+        tagged_entries.extend(
+            entry
+            for collection_name in ("items", "fulfillments")
+            for entry in (order.get(collection_name, []) or [])
+            if isinstance(entry, dict)
+        )
+        for entry in tagged_entries:
+            tags = entry.get("tags", [])
+            if not isinstance(tags, list):
                 continue
-            for entry in collection:
-                if not isinstance(entry, dict):
+            for tag in tags:
+                if not isinstance(tag, dict):
                     continue
-                tags = entry.get("tags", [])
-                if not isinstance(tags, list):
-                    continue
-                for tag in tags:
-                    if not isinstance(tag, dict):
+                code = str(tag.get("code", "")).lower()
+                if code in {"rto_action", "cancel_request"}:
+                    return True
+                # Some Workbench fixtures wrap the marker in a tag list.
+                for value in tag.get("list", []) or []:
+                    if not isinstance(value, dict):
                         continue
-                    code = str(tag.get("code", "")).lower()
-                    if code in {"rto_action", "cancel_request"}:
+                    nested_code = str(value.get("code", "")).lower()
+                    nested_value = str(value.get("value", "")).lower()
+                    if nested_code in {"rto_action", "cancel_request"} or nested_value in {
+                        "rto",
+                        "rto_action",
+                    }:
                         return True
-                    # Some Workbench fixtures wrap the marker in a tag list.
-                    for value in tag.get("list", []) or []:
-                        if not isinstance(value, dict):
-                            continue
-                        nested_code = str(value.get("code", "")).lower()
-                        nested_value = str(value.get("value", "")).lower()
-                        if nested_code in {"rto_action", "cancel_request"} or nested_value in {
-                            "rto",
-                            "rto_action",
-                        }:
-                            return True
 
     haystack = " ".join(
         str(value).lower()
