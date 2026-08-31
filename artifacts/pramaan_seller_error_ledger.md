@@ -39,6 +39,13 @@ Header Validation: OFF is a Workbench session setting only. Production signature
 
 Current session outcome: seven flows completed at 100%; Return and RTO are externally blocked at malformed Workbench mock `update` requests. No new Seller-owned schema failure was observed in this run.
 
+## Final deployment verification
+
+- Commit `8e29a26` is pushed to `origin/main`.
+- Cloud Run revision `fromnear-ondc-backend-00355-qn5` serves 100% traffic.
+- Health endpoint is green and the live diagnostics report Seller signature and payload preflight PASS.
+- The current Workbench session predates this revision, but the deployed source is the same verified implementation. A clean final Workbench report cannot be claimed while Workbench itself rejects Return/RTO mock updates with `subscriberID not set` before BPP delivery.
+
 ## Iteration 5: Contract-aligned breakup tag boundary
 
 - Contract source reviewed: [ONDC API contract](https://docs.google.com/document/d/1brvcltG_DagZ3kGr1ZZQk4hG4tze3zvcxmGV4NMTzr8/edit), including the RET10 1.2.0 examples.

@@ -281,3 +281,13 @@ Tests added: none in this iteration; existing quote-tag, area-code, RTO, and cal
 
 Next iteration objective:
 - Commit and push the verified source and certification artifacts, deploy the committed revision, verify health and traffic, and generate the current session report. Re-run Return/RTO only if Workbench provides a valid update request containing `subscriberID`.
+
+## Deployment verification after Iteration 7
+
+Deployment revision: `fromnear-ondc-backend-00355-qn5`
+Traffic: 100%
+Health: `https://ondc.fromnear.com/api/v1/health` returned `status=healthy`, `database=healthy`.
+Diagnostics: configuration, signature derivation, callback route, and payload preflight PASS; registry/gateway/subscriber lookup remain external pre-production checks.
+Git commit: `8e29a26` pushed to `origin/main`.
+
+The Workbench session `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y` was executed before this final deployment and already verified seven independent green flows. The remaining Return/RTO failures are Workbench mock requests rejected with `subscriberID not set` before reaching the Seller endpoint; they require a fresh valid Workbench mock request for final certification.
