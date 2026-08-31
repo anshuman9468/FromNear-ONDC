@@ -115,3 +115,14 @@ This closes the registry and diagnostics-tooling blockers observed in earlier it
 - The deployed BPP key ID was corrected from the mistyped `490ba36f...` to `490ba361-51d0-49b7-8c00-182892758de9` in Cloud Run revision `fromnear-ondc-backend-00338-bk5`.
 - The buyer key ID remains unchanged.
 - Diagnostics still report signature and payload preflight PASS, but the official registry returns `15040 Subscriber not found` for the corrected seller ID. Registration/subscription is still required.
+
+## Iteration 10: live Workbench evidence
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Workbench persisted a stalled second mock `select` as the active flow | Out of Stock | N/A | 1 blocked step | External Workbench blocker | Workbench scenario runner | No Seller request was received after the first ACK; reset with a fresh session before final certification. |
+| Workbench mock generator references undefined `defaultPayload` | Buyer Return `/update` | N/A | 1 generation failure | External Workbench blocker | Workbench mock generator | No Seller `/update` request reached the service; do not patch Seller payload code for this error. |
+| RTO scenario has no marker distinguishing it from normal prepaid confirm | Merchant RTO `/on_update` | Persistent in earlier sessions | 1 blocked branch | Requires scenario input | Workbench scenario + Seller flow mode | Keep `auto` mode; do not globally force RTO because the same deployment must pass normal prepaid. |
+| HTTP gzip content was parsed as JSON bytes | BAP callback ingress | Repeated in earlier live logs | 0 after deployment | Fixed and live-verified | `backend/app/api/endpoints/ondc.py` | Decode gzip/deflate before signature validation and JSON parsing; add integration regression test. |
+
+Current session `Ed2abHsNVZSDuPHlLc898KPCWTxCEblX`: cancellation, discovery pull, IGM prepaid, and standard prepaid completed at 100% with ACKs. Return and RTO were blocked by Workbench/mock sequencing; Out of Stock blocked before its second mock request; catalog flows were not executed because the session remained active on that step.

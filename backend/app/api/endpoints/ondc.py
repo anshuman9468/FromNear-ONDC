@@ -1,5 +1,7 @@
+import gzip
 import json
 import logging
+import zlib
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +25,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _decode_content_encoded_body(request: Request, body_bytes: bytes) -> bytes:
+    """Decode transport compression before parsing an ONDC callback body.
+
+    Gateways and proxies may gzip the JSON representation. ONDC signatures
+    describe the JSON payload, so callers should validate and parse the
+    decoded representation rather than attempting to load compressed bytes.
+    """
+    content_encoding = request.headers.get("content-encoding", "").lower()
+    if "gzip" in content_encoding:
+        return gzip.decompress(body_bytes)
+    if "deflate" in content_encoding:
+        return zlib.decompress(body_bytes)
+    return body_bytes
+
+
 async def process_ondc_callback(
     request: Request,
     db: AsyncSession,
@@ -30,7 +47,19 @@ async def process_ondc_callback(
     handler_func
 ) -> Any:
     """Generic helper to parse, validate signatures, validate timestamps, and handle ONDC callback payloads."""
-    body_bytes = await request.body()
+    raw_body_bytes = await request.body()
+    try:
+        body_bytes = _decode_content_encoded_body(request, raw_body_bytes)
+    except (OSError, zlib.error) as exc:
+        logger.error("Failed to decompress incoming callback body for %s: %s", action, exc)
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "context": {},
+                "message": {"ack": {"status": "NACK"}},
+                "error": {"code": "10004", "message": "Request body compression is invalid"},
+            },
+        )
     
     # 1. Unconditionally log every inbound callback body
     try:

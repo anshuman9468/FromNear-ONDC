@@ -315,6 +315,33 @@ Verification:
 - Buyer cancellation dry run: passed.
 - Catalog audit: all six checks passed.
 
+## Iteration 10: Live session Ed2abHsNVZSDuPHlLc898KPCWTxCEblX
+
+Session ID: `Ed2abHsNVZSDuPHlLc898KPCWTxCEblX`
+Deployment revision: `fromnear-ondc-backend-00358-j4c` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting reported OFF by the operator; production signature verification remains enabled.
+
+Flows observed:
+- Buyer Initiated Return: 72%; Workbench mock `update` failed to generate (`defaultPayload is not defined`) before any Seller `/update` request.
+- Buyer Side Order Cancellation: 100% with expected callbacks ACK.
+- Discovery incremental catalog refresh pull: 100% with expected callbacks ACK.
+- Merchant Side RTO and Part Order Cancellation: 43%; select/init/confirm ACK, but unsolicited `on_update` remained waiting. The request had no RTO/cancel marker, so `auto` mode could not safely classify it.
+- Order to confirm to fulfillment Prepaid with IGM 1.0.0: 100% with expected callbacks ACK.
+- Order to confirm to fulfillment (Prepaid): 100% with expected callbacks ACK.
+- Out of Stock: 13%; first select/on_select ACK, then Workbench stayed at the second mock `select` in SENDING. Cloud Run logs show no second request reached the Seller.
+- Full Catalog City and Incremental Push: not started because Workbench persisted Out of Stock as the active flow.
+
+Certification status: not a clean final report. The active-flow lock disabled report generation. Do not claim zero failures from this session.
+
+Verification:
+- Full backend suite: `53 passed`.
+- Live health: healthy database/service.
+- Live revision: `fromnear-ondc-backend-00358-j4c`, 100% traffic.
+
+Next iteration objective:
+- Start a fresh Seller session after the Workbench active-flow lock is reset, run catalog flows first, then all order/exception flows, and generate a report.
+
 Deployment verification:
 - Cloud Run revision `fromnear-ondc-backend-00357-tsd` is ready and serves 100% traffic.
 - `/api/v1/health` reports healthy database/service status.

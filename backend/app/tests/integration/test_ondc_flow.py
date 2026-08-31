@@ -1,3 +1,4 @@
+import gzip
 import json
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
@@ -120,6 +121,45 @@ def test_on_search_callback_and_results(client: TestClient):
         assert product["transaction_id"] == transaction_id
 
 
+def test_on_search_callback_decodes_gzip_body(client: TestClient):
+    """Accept gateway callbacks that use HTTP gzip content encoding."""
+    with patch.object(settings, "ONDC_VERIFY_SIGNATURES", False):
+        import datetime
+
+        callback_payload = {
+            "context": {
+                "domain": settings.ONDC_DOMAIN,
+                "country": settings.ONDC_COUNTRY,
+                "city": settings.ONDC_CITY,
+                "action": "on_search",
+                "core_version": "1.2.0",
+                "bap_id": settings.ONDC_SUBSCRIBER_ID,
+                "bap_uri": settings.ONDC_SUBSCRIBER_URI,
+                "bpp_id": "gzip-bpp",
+                "bpp_uri": "https://gzip-bpp.example/ondc",
+                "transaction_id": "gzip-callback-tx",
+                "message_id": "gzip-callback-msg",
+                "timestamp": datetime.datetime.now(datetime.timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            },
+            "message": {"catalog": {"bpp/providers": []}},
+        }
+        body_bytes = json.dumps(callback_payload, separators=(",", ":")).encode("utf-8")
+
+        response = client.post(
+            "/api/v1/ondc/on_search",
+            content=gzip.compress(body_bytes),
+            headers={"Content-Type": "application/json", "Content-Encoding": "gzip"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "context": callback_payload["context"],
+            "message": {"ack": {"status": "ACK"}},
+        }
+
+
 def test_on_search_callback_signature_failure(client: TestClient):
     """Test on_search callback returns 401/NACK when signature verification is enabled but invalid."""
     with patch.object(settings, "ONDC_VERIFY_SIGNATURES", True):
@@ -234,4 +274,3 @@ def test_on_search_callback_signature_success(client: TestClient):
                 "context": callback_payload["context"],
                 "message": {"ack": {"status": "ACK"}}
             }
-
