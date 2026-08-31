@@ -60,8 +60,8 @@ The repository diagnostics had a role consistency bug: lookup used the active BP
 
 | Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
 |---|---|---:|---:|---|---|---|
-| Diagnostics compared BPP registry records with BAP key ID/public key | Pre-production registry diagnostics | 1 misleading result | 0 in local regression | Fixed in source; deployment pending | Diagnostics utility | Compare `ukId`, signing key, and encryption key against the active BPP credential set. |
-| Diagnostics gateway probe signed with BAP credentials while BPP mode was active | Gateway diagnostics | 1 misleading probe | 0 in local regression | Fixed in source; deployment pending | Diagnostics utility | Sign with the same active credential set selected for registry lookup. |
+| Diagnostics compared BPP registry records with BAP key ID/public key | Pre-production registry diagnostics | 1 misleading result | 0 in local regression | Fixed and live-verified | Diagnostics utility | Compare `ukId`, signing key, and encryption key against the active BPP credential set. |
+| Diagnostics gateway probe signed with BAP credentials while BPP mode was active | Gateway diagnostics | 1 misleading probe | 0 in local regression | Fixed and live-verified | Diagnostics utility | Sign with the same active credential set selected for registry lookup. |
 | Verification script displayed obsolete Buyer/`.app` fallback values | `verify_preprod_registration.py` | 1 misleading operator instruction | 0 in source | Fixed | Verification tooling | Report active BPP credentials and `ONDC_SUBSCRIBER_URI`. |
 
 No new Seller payload or callback schema failure was introduced. The Workbench `subscriberID not set` blocker remains external and occurs before the Seller endpoint.
@@ -72,8 +72,8 @@ The live diagnostics probe after revision `00356-kwx` exposed two contract-shape
 
 | Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
 |---|---|---:|---:|---|---|---|
-| Registry lookup used `unique_key_id` instead of contract `ukId` and omitted country/city selectors | Registry diagnostics | 1 | 0 in source tests | Fixed in source; deployment pending | Diagnostics utility | Send `subscriber_id`, `domain`, `ukId`, `country`, `city`, and `type`. |
-| Gateway diagnostic search intent omitted payment | Gateway diagnostics | 1 | 0 in source tests | Fixed in source; deployment pending | Diagnostics utility | Include buyer-app finder-fee payment fields required by the active search contract. |
+| Registry lookup used `unique_key_id` instead of contract `ukId` and omitted country/city selectors | Registry diagnostics | 1 | 0 in source tests | Fixed and live-verified | Diagnostics utility | Send `subscriber_id`, `domain`, `ukId`, `country`, `city`, and `type`. |
+| Gateway diagnostic search intent omitted payment | Gateway diagnostics | 1 | 0 in source tests | Fixed and live-verified | Diagnostics utility | Include buyer-app finder-fee payment fields required by the active search contract. |
 
 These were diagnostic probe defects, not Seller callback payload defects. The correction makes live diagnostics useful for distinguishing registry onboarding failures from malformed local probes.
 

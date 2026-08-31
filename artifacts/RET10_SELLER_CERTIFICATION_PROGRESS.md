@@ -295,7 +295,7 @@ The Workbench session `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y` was executed before thi
 ## Iteration 8: Contract-aligned active BPP diagnostics
 
 Session ID: `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y` (existing evidence; no new Workbench report generated)
-Deployment revision: Pending deployment of this diagnostics-only correction
+Deployment revision: `fromnear-ondc-backend-00357-tsd`
 Protocol version: `1.2.0`
 Header validation: Workbench-only setting; production signature verification unchanged
 
@@ -336,7 +336,7 @@ Next iteration objective:
 
 ## Iteration 9: Contract-correct registry and gateway probes
 
-Deployment revision: Pending deployment of this correction
+Deployment revision: `fromnear-ondc-backend-00357-tsd`
 Protocol version: `1.2.0`
 Header validation: Workbench-only setting; production signature verification unchanged
 
