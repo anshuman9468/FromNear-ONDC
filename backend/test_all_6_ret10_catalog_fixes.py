@@ -15,8 +15,11 @@ print("✅ 1. TAGS_BPP_TERMS_NP_TYPE: bpp_terms tag with np_type 'MSN' verified!
 
 for provider in cat.get("bpp/providers", []):
     prov_tags = provider.get("tags", [])
-    bpp_terms_prov = [t for t in prov_tags if t.get("code") == "bpp_terms"]
-    assert bpp_terms_prov, "1. TAGS_BPP_TERMS_NP_TYPE: provider.tags missing bpp_terms!"
+    # RET10 places the MSN type under bpp/descriptor.tags. Provider tags have
+    # their own restricted vocabulary and must not repeat bpp_terms.
+    assert all(t.get("code") != "bpp_terms" for t in prov_tags), (
+        "1. TAGS_BPP_TERMS_NP_TYPE: bpp_terms belongs under bpp/descriptor.tags"
+    )
 
     for item in provider.get("items", []):
         item_id = item.get("id")

@@ -1,5 +1,10 @@
 import re
-from app.ondc.bpp.services.search import bpp_search_service, ALLOWED_PROVIDER_TAG_CODES, CATEGORY_ID_REGEX
+from app.ondc.bpp.services.search import (
+    bpp_search_service,
+    ALLOWED_PROVIDER_TAG_CODES,
+    CATEGORY_ID_REGEX,
+    OFFICIAL_RET10_GROCERY_CATEGORIES,
+)
 
 cat = bpp_search_service.mock_catalog
 
@@ -26,11 +31,15 @@ for provider in cat.get("bpp/providers", []):
         assert CATEGORY_ID_REGEX.match(cat_id), f"Category ID '{cat_id}' does not match regex ^[a-zA-Z0-9]{{1,12}}$!"
         print(f"✅ Category ID '{cat_id}' matches regex ^[a-zA-Z0-9]{{1,12}}$!")
 
-    # 4. Check Items Category ID
+    # RET10 item category_id is the published grocery category enum (for
+    # example, "Rice and Rice Products"). The short alphanumeric constraint
+    # applies to provider category object IDs, not this item enum.
     for item in provider.get("items", []):
         item_id = item.get("id")
         item_cat_id = item.get("category_id")
-        assert CATEGORY_ID_REGEX.match(item_cat_id), f"Item {item_id} category_id '{item_cat_id}' invalid!"
-        print(f"✅ Item {item_id} category_id '{item_cat_id}' matches regex ^[a-zA-Z0-9]{{1,12}}$!")
+        assert item_cat_id in OFFICIAL_RET10_GROCERY_CATEGORIES, (
+            f"Item {item_id} category_id '{item_cat_id}' is not a RET10 grocery category"
+        )
+        print(f"✅ Item {item_id} category_id '{item_cat_id}' is a RET10 grocery category!")
 
 print("\n🎉 ALL PROVIDER TAGS AND CATEGORY ID CHECKS PASSED WITH 0 ERRORS!")

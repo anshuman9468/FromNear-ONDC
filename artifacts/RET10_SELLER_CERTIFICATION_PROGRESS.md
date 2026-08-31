@@ -209,3 +209,29 @@ Regressions: none in local tests or dry run.
 
 Next iteration objective:
 - Create a fresh Workbench Seller RET10 Grocery session against revision `00345-d5v`, disable Header Validation in Workbench, run every applicable flow once, and generate a fresh report. Do not reuse the old session for certification.
+
+## Iteration 6: Local contract audit cleanup
+
+Session ID: Not applicable
+Deployment revision: Not deployed in this iteration
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- Focused Seller application suite: `51 passed`.
+- Full local lifecycle dry run: all 12 callback payloads passed RET10 validation.
+- Buyer cancellation dry run passed.
+- Catalog audit confirms MSN `bpp_terms` is under `bpp/descriptor.tags`, provider tags use the restricted provider vocabulary, item tags are arrays, item locations use `location_id`, and item categories use the RET10 grocery enum.
+
+Failed or incomplete remote flows:
+- No new Workbench run in this iteration.
+- Seller registry propagation remains an external prerequisite for signed callback certification.
+
+Fixed since prior run:
+- Corrected two contradictory repository audits that treated `bpp_terms` as both required and forbidden under provider tags.
+- Corrected the item category audit to validate the RET10 grocery category enum; the alphanumeric constraint remains applied to provider category object IDs only.
+
+Regressions: none observed in the focused local suite.
+
+Next iteration objective:
+- Commit the audit corrections, deploy only after the live deployment credentials and registry state are confirmed, then run a fresh Workbench Seller session and parse the resulting report.
