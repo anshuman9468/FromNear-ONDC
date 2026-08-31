@@ -235,3 +235,49 @@ Regressions: none observed in the focused local suite.
 
 Next iteration objective:
 - Commit the audit corrections, deploy only after the live deployment credentials and registry state are confirmed, then run a fresh Workbench Seller session and parse the resulting report.
+
+## Iteration 7: Fresh Workbench execution on current Seller revision
+
+Session ID: `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y`
+Deployment revision: `fromnear-ondc-backend-00353-lfc` (100% traffic; `ONDC_BPP_FLOW_MODE=auto`)
+Protocol version: `1.2.0`
+Header validation: OFF
+
+Passed validations:
+- Local Seller suite: `52 passed`.
+- Full Catalog City: 100%, all expected steps ACK.
+- Buyer Side Order Cancellation: 100%, all expected steps ACK.
+- Discovery incremental catalog refresh pull: 100%, all expected steps ACK.
+- Prepaid with IGM 1.0.0: 100%, all expected steps ACK.
+- Prepaid fulfillment: 100%, all expected steps ACK.
+- Out of Stock: 100%, all expected steps ACK.
+- Incremental catalog push: 100%, all expected steps ACK.
+- RTO seller callbacks through `on_update`: select, on_select, init, on_init, confirm, on_confirm, and on_update all returned HTTP 200/ACK.
+
+Failed or incomplete remote flows:
+- Buyer Initiated Return: Workbench mock `update` stopped at step 13 with `BAD Request: subscriberID not set`; no `/update` request reached the Seller BPP.
+- Merchant Side RTO: Workbench mock `update` stopped at step 8 with `BAD Request: subscriberID not set`; no `/update` request reached the Seller BPP.
+- The RTO card retains five out-of-sequence entries from an earlier attempt in this same session. The fresh execution before the mock failure had no new out-of-sequence callback.
+
+Fixed since prior run:
+- No speculative Seller code change was made for the two mock failures because live Cloud Run logs prove the failing request never reached this BPP.
+- Current deployed callbacks continued to pass the previously failing quote-tag and catalog shape checks.
+
+Persistent:
+- Workbench's mock update request omits `subscriberID` in both Return and RTO scenarios. This is an external test-harness blocker, not a Seller response validation failure.
+
+New deeper validations: none; the blocked mock requests prevented downstream update assertions.
+
+Regressions: none observed in local tests or the seven independent green flows.
+
+Root causes:
+1. The shared Seller payload fixes are effective on the current live revision.
+2. Return/RTO cannot advance past the Workbench mock update step because the mock request is malformed before BPP delivery.
+
+Code changes in this iteration:
+- None after the fresh-session evidence; prior uncommitted source changes remain covered by the local suite and current deployment.
+
+Tests added: none in this iteration; existing quote-tag, area-code, RTO, and callback guard tests cover the deployed changes.
+
+Next iteration objective:
+- Commit and push the verified source and certification artifacts, deploy the committed revision, verify health and traffic, and generate the current session report. Re-run Return/RTO only if Workbench provides a valid update request containing `subscriberID`.

@@ -29,6 +29,16 @@ Failures named `retail_bap_*` validate inbound BAP/Workbench request fixtures. T
 
 Header Validation: OFF is a Workbench session setting only. Production signature verification remains enabled.
 
+## Fresh-session evidence: `k4kD53-rIYTq0zTeyC7AtY_OF9WLDg5y`
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Workbench mock update request omits `subscriberID` before delivery | Buyer Return / `update` and Merchant RTO / `update` | Not previously isolated | 2 blocked mock steps | External Workbench blocker | Workbench mock generator | No Seller-side patch is valid because Cloud Run received no `/update`; rerun after Workbench emits a valid request. |
+| Seller callback payloads fail to reach downstream validations | Catalog, cancellation, prepaid, OOS, incremental, RTO callbacks | Repeated historically | 0 in fresh green flows | Fixed and live-verified | Shared Seller builders and callback boundary | Current revision returned HTTP 200/ACK for all executed Seller callbacks; seven independent flows reached 100%. |
+| Stale out-of-sequence records remain in a reused flow card | Merchant RTO | 5 stale records | 5 retained UI records | Session-history artifact | Workbench session UI | Do not count retained prior-attempt cards as new BPP callbacks; certify with a clean new session after the mock blocker is resolved. |
+
+Current session outcome: seven flows completed at 100%; Return and RTO are externally blocked at malformed Workbench mock `update` requests. No new Seller-owned schema failure was observed in this run.
+
 ## Iteration 5: Contract-aligned breakup tag boundary
 
 - Contract source reviewed: [ONDC API contract](https://docs.google.com/document/d/1brvcltG_DagZ3kGr1ZZQk4hG4tze3zvcxmGV4NMTzr8/edit), including the RET10 1.2.0 examples.

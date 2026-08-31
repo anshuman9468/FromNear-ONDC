@@ -85,22 +85,19 @@ class BppNetworkClient:
             order_state=order.get("state"),
         )
         # Keep the wire contract authoritative even when a stored order was
-        # created by an older process. Product breakup lines use item taxonomy
-        # tags; quote metadata is reserved for fulfillment-level fee lines.
+        # created by an older process. RET10 requires quote tags on every
+        # nested breakup item, including product lines.
         for breakup in canonical.get("quote", {}).get("breakup", []):
             if not isinstance(breakup, dict) or not isinstance(breakup.get("item"), dict):
                 continue
             title_type = breakup.get("@ondc/org/title_type")
-            if title_type == "item":
-                breakup["item"]["tags"] = [{
+            breakup["item"]["tags"] = [{
+                "code": "quote",
+                "list": [{
                     "code": "type",
-                    "list": [{"code": "type", "value": "item"}],
-                }]
-            else:
-                breakup["item"]["tags"] = [{
-                    "code": "quote",
-                    "list": [{"code": "type", "value": "fulfillment"}],
-                }]
+                    "value": "fulfillment" if title_type == "delivery" else "item",
+                }],
+            }]
         # Lifecycle-specific fields are not part of the generic order builder.
         if isinstance(order.get("cancellation"), dict):
             canonical["cancellation"] = order["cancellation"]

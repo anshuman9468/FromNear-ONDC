@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.ondc.bpp.client import BppNetworkClient
 from app.ondc.bpp.order_builder import build_canonical_order, build_canonical_quote, validate_ret10_payload
-from app.ondc.bpp.services.search import BppSearchService, _is_incremental_push, _normalize_catalog_quantities
+from app.ondc.bpp.services.search import (
+    BppSearchService,
+    _align_catalog_area_code,
+    _is_incremental_push,
+    _normalize_catalog_quantities,
+)
 from app.ondc.bpp.lifecycle import is_rto_flow
 from app.ondc.bpp.state_machine import LifecycleTracker, lifecycle_tracker
 
@@ -97,6 +102,24 @@ def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_locatio
     assert isinstance(item["tags"], list)
 
 
+def test_search_catalog_uses_requested_delivery_area_code():
+    catalog = {"bpp/providers": [{"locations": [{"id": "L1", "address": {"area_code": "560001"}}]}]}
+    payload = {
+        "message": {
+            "intent": {
+                "fulfillment": {
+                    "end": {"location": {"address": {"area_code": "110001"}}}
+                }
+            }
+        }
+    }
+
+    aligned = _align_catalog_area_code(catalog, payload)
+
+    assert aligned["bpp/providers"][0]["locations"][0]["address"]["area_code"] == "110001"
+    assert catalog["bpp/providers"][0]["locations"][0]["address"]["area_code"] == "560001"
+
+
 def test_incremental_push_mode_is_detected_and_does_not_answer_final_search():
     payload = {
         "context": {**CONTEXT, "action": "search"},
@@ -134,7 +157,7 @@ def test_quote_breakup_items_use_ret10_line_tag_vocabulary():
         assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
         assert isinstance(item["tags"], list) and item["tags"]
         if breakup["@ondc/org/title_type"] == "item":
-            assert item["tags"][0] == {"code": "type", "list": [{"code": "type", "value": "item"}]}
+            assert item["tags"][0] == {"code": "quote", "list": [{"code": "type", "value": "item"}]}
         else:
             assert item["tags"][0] == {"code": "quote", "list": [{"code": "type", "value": "fulfillment"}]}
         assert isinstance(item["quantity"], dict)
@@ -170,7 +193,7 @@ def test_network_guard_rewrites_legacy_quote_tags_from_stored_orders():
     )
 
     assert message["order"]["quote"]["breakup"][0]["item"]["tags"] == [
-        {"code": "type", "list": [{"code": "type", "value": "item"}]}
+        {"code": "quote", "list": [{"code": "type", "value": "item"}]}
     ]
 
 

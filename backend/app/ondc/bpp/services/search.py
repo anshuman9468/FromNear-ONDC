@@ -353,6 +353,23 @@ def _make_incremental_catalog(catalog: dict, search_count: int) -> dict:
     return pushed_catalog
 
 
+def _align_catalog_area_code(catalog: dict, payload: dict) -> dict:
+    """Use the requested delivery area for gateway city/serviceability checks."""
+    intent = payload.get("message", {}).get("intent", {})
+    fulfillment = intent.get("fulfillment", {}) if isinstance(intent, dict) else {}
+    end_location = fulfillment.get("end", {}).get("location", {})
+    address = end_location.get("address", {}) if isinstance(end_location, dict) else {}
+    area_code = str(address.get("area_code") or "").strip()
+    if not area_code:
+        return catalog
+
+    aligned = copy.deepcopy(catalog)
+    for provider in aligned.get("bpp/providers", []):
+        for location in provider.get("locations", []):
+            location.setdefault("address", {})["area_code"] = area_code
+    return aligned
+
+
 class BppSearchService:
     def __init__(self):
         catalog_path = Path(__file__).parent.parent / "catalog" / "mock_catalog.json"
@@ -374,6 +391,7 @@ class BppSearchService:
         await asyncio.sleep(0.5)
 
         normalized_catalog = _make_incremental_catalog(self.mock_catalog, search_count)
+        normalized_catalog = _align_catalog_area_code(normalized_catalog, payload)
 
         if _is_custom_menu_push_flow(payload):
             # Workbench records the first on_search as the direct response to

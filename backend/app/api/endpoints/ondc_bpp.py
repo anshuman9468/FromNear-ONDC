@@ -84,6 +84,56 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
             )
 
     order_id = payload.get("message", {}).get("order", {}).get("id", "UNKNOWN")
+    inbound_order = payload.get("message", {}).get("order", {})
+    if isinstance(inbound_order, dict):
+        def _tag_summary(value):
+            if not isinstance(value, list):
+                return []
+            return [
+                {
+                    "code": tag.get("code"),
+                    "list_codes": [
+                        entry.get("code")
+                        for entry in tag.get("list", [])
+                        if isinstance(entry, dict)
+                    ],
+                    "list_values": [
+                        entry.get("value")
+                        for entry in tag.get("list", [])
+                        if isinstance(entry, dict)
+                    ],
+                }
+                for tag in value
+                if isinstance(tag, dict)
+            ]
+
+        logger.info(
+            "[BPP INPUT SHAPE] action=%s tx=%s order_keys=%s "
+            "item_keys=%s fulfillment_shapes=%s order_tags=%s item_tags=%s fulfillment_tags=%s",
+            action,
+            context.get("transaction_id"),
+            sorted(inbound_order.keys()),
+            [sorted(item.keys()) for item in inbound_order.get("items", []) if isinstance(item, dict)],
+            [
+                {
+                    "keys": sorted(fulfillment.keys()),
+                    "type": fulfillment.get("type"),
+                    "category": fulfillment.get("@ondc/org/category"),
+                }
+                for fulfillment in inbound_order.get("fulfillments", [])
+                if isinstance(fulfillment, dict)
+            ],
+            _tag_summary(inbound_order.get("tags")),
+            [_tag_summary(item.get("tags")) for item in inbound_order.get("items", []) if isinstance(item, dict)],
+            [_tag_summary(fulfillment.get("tags")) for fulfillment in inbound_order.get("fulfillments", []) if isinstance(fulfillment, dict)],
+        )
+    if action == "catalog_rejection":
+        logger.error(
+            "[BPP CATALOG REJECTION] tx=%s message_id=%s payload=%s",
+            context.get("transaction_id"),
+            context.get("message_id"),
+            json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        )
     if action == "track":
         # Mark the request before the delayed handler starts so a concurrent
         # post-confirm task cannot emit a status after Workbench enters track.
