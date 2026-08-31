@@ -29,6 +29,14 @@ Failures named `retail_bap_*` validate inbound BAP/Workbench request fixtures. T
 
 Header Validation: OFF is a Workbench session setting only. Production signature verification remains enabled.
 
+## Iteration 5: Contract-aligned breakup tag boundary
+
+- Contract source reviewed: [ONDC API contract](https://docs.google.com/document/d/1brvcltG_DagZ3kGr1ZZQk4hG4tze3zvcxmGV4NMTzr8/edit), including the RET10 1.2.0 examples.
+- Root cause: product breakup lines were normalized as fulfillment-level `quote` tags. RET10 validates product lines with the item taxonomy (`type`, `parent`, `child`, `origin`, `veg_nonveg`, `custom_group`), while fulfillment fee lines use `quote` metadata.
+- Fix: both the canonical BPP quote builder and final outbound network canonicalizer now select tags from `@ondc/org/title_type`; the validator applies the matching vocabulary. The legacy default constant was corrected as a defensive guard.
+- Verification: `51 passed`; all 12 local lifecycle callbacks passed the RET10 dry-run validator.
+- Remote certification: pending a fresh Workbench Seller session. Existing sessions are not valid final evidence because they contain stale branch state and the seller key registry blocker.
+
 ## Live Iteration 1 Evidence
 
 - Deployment: Cloud Run revision `fromnear-ondc-backend-00336-ncq` (v15), health endpoint passed.

@@ -127,15 +127,16 @@ def test_incremental_push_mode_is_detected_and_does_not_answer_final_search():
     assert unsolicited.await_count == 2
 
 
-def test_quote_breakup_items_use_ret10_quote_tag_vocabulary():
+def test_quote_breakup_items_use_ret10_line_tag_vocabulary():
     quote = build_canonical_quote([{"id": "I1", "quantity": {"count": 1}}])
     for breakup in quote["breakup"]:
         item = breakup["item"]
         assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
         assert isinstance(item["tags"], list) and item["tags"]
-        assert item["tags"][0]["code"] == "quote"
-        assert item["tags"][0]["list"][0]["code"] == "type"
-        assert item["tags"][0]["list"][0]["value"] in {"item", "fulfillment"}
+        if breakup["@ondc/org/title_type"] == "item":
+            assert item["tags"][0] == {"code": "type", "list": [{"code": "type", "value": "item"}]}
+        else:
+            assert item["tags"][0] == {"code": "quote", "list": [{"code": "type", "value": "fulfillment"}]}
         assert isinstance(item["quantity"], dict)
         assert isinstance(item["quantity"]["selected"]["count"], int)
         assert isinstance(item["price"], dict)
@@ -169,7 +170,7 @@ def test_network_guard_rewrites_legacy_quote_tags_from_stored_orders():
     )
 
     assert message["order"]["quote"]["breakup"][0]["item"]["tags"] == [
-        {"code": "quote", "list": [{"code": "type", "value": "item"}]}
+        {"code": "type", "list": [{"code": "type", "value": "item"}]}
     ]
 
 

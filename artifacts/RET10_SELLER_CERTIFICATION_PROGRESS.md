@@ -117,6 +117,37 @@ Regressions: none observed
 Next iteration objective:
 - After registry subscription and propagation, create a fresh Seller RET10 Grocery session, disable Header Validation in Workbench, run all applicable flows, download the report, and parse every failure.
 
+## Iteration 5
+
+Session ID: Not created; source-level contract fix only
+Deployment revision: Not deployed in this iteration
+Protocol version: 1.2.0 behavior from the active Workbench contract examples
+Header validation: OFF for Workbench sessions only
+
+Passed validations:
+- `51 passed` in `PYTHONPATH=. pytest -q app/tests`.
+- All 12 callback payloads passed `test_full_ret10_lifecycle_dryrun.py` with zero local RET10 validation errors.
+
+Failed validations:
+- No new Workbench report in this iteration.
+
+Flows passed: Local lifecycle coverage only
+Flows failed: Remote flows not executed in this iteration
+Flows newly reached: None
+
+Fixed since prior run:
+- Product quote-breakup lines now emit RET10 item taxonomy tags.
+- Fulfillment-level quote lines retain `quote` / `fulfillment` metadata.
+- Final network canonicalization applies the same boundary to legacy stored orders.
+
+Persistent:
+- Seller key ID `490ba361-51d0-49b7-8c00-182892758de9` still requires successful pre-production registry propagation before signed Workbench callbacks can be certified.
+
+Regressions: none observed locally.
+
+Next iteration objective:
+- Commit and deploy the verified source change, confirm the live revision, then use a new Workbench Seller RET10 Grocery session and analyze a fresh report.
+
 ## Deployment Correction: Seller Unique Key ID
 
 Deployment revision: `fromnear-ondc-backend-00338-bk5` (100% traffic)
