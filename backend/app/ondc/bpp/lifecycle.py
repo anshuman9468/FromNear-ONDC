@@ -59,35 +59,28 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
     order = (payload or {}).get("message", {}).get("order", {})
     if isinstance(order, dict):
         # RET10 fixtures may place the merchant-side marker directly on the
-        # order, rather than repeating it on every item/fulfillment.
-        tagged_entries = [{"tags": order.get("tags", [])}]
-        tagged_entries.extend(
-            entry
-            for collection_name in ("items", "fulfillments")
-            for entry in (order.get(collection_name, []) or [])
-            if isinstance(entry, dict)
-        )
-        for entry in tagged_entries:
-            tags = entry.get("tags", [])
-            if not isinstance(tags, list):
-                continue
-            for tag in tags:
-                if not isinstance(tag, dict):
-                    continue
-                code = str(tag.get("code", "")).lower()
-                if code in {"rto_action", "cancel_request"}:
-                    return True
-                # Some Workbench fixtures wrap the marker in a tag list.
-                for value in tag.get("list", []) or []:
-                    if not isinstance(value, dict):
-                        continue
-                    nested_code = str(value.get("code", "")).lower()
-                    nested_value = str(value.get("value", "")).lower()
-                    if nested_code in {"rto_action", "cancel_request"} or nested_value in {
-                        "rto",
-                        "rto_action",
-                    }:
+        # order, on an item/fulfillment, or inside nested tag-list metadata.
+        # Walk the complete order tree so serialization shape does not change
+        # the lifecycle branch selected for the transaction.
+        marker_codes = {"rto_action", "cancel_request"}
+        marker_values = {"rto", "rto_action", "return_to_origin", "return-to-origin"}
+
+        def contains_rto_marker(value: Any) -> bool:
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    normalized_key = str(key).lower()
+                    normalized_value = str(nested).lower() if isinstance(nested, str) else ""
+                    if normalized_key in {"code", "value", "action", "category", "type"}:
+                        if normalized_value in marker_codes or normalized_value in marker_values:
+                            return True
+                    if contains_rto_marker(nested):
                         return True
+            elif isinstance(value, list):
+                return any(contains_rto_marker(item) for item in value)
+            return False
+
+        if contains_rto_marker(order):
+            return True
 
     haystack = " ".join(
         str(value).lower()

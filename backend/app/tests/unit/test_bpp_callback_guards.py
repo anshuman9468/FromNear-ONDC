@@ -262,6 +262,28 @@ def test_rto_flow_is_detected_from_order_level_tags():
     assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is True
 
 
+def test_rto_flow_is_detected_from_nested_fulfillment_metadata():
+    payload = {
+        "message": {
+            "order": {
+                "fulfillments": [
+                    {
+                        "type": "RTO",
+                        "tags": [
+                            {
+                                "code": "state",
+                                "list": [{"code": "action", "value": "return_to_origin"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+
+    assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is True
+
+
 def test_rto_detection_does_not_classify_buyer_return_tags():
     payload = {
         "message": {
