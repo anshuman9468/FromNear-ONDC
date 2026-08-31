@@ -62,7 +62,10 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
         # order, on an item/fulfillment, or inside nested tag-list metadata.
         # Walk the complete order tree so serialization shape does not change
         # the lifecycle branch selected for the transaction.
-        marker_codes = {"rto_action", "cancel_request"}
+        # ``cancel_request`` is also used by buyer-initiated return flows.
+        # It cannot identify merchant RTO on its own; only explicit RTO
+        # markers may select the RTO lifecycle branch.
+        marker_codes = {"rto_action"}
         marker_values = {"rto", "rto_action", "return_to_origin", "return-to-origin"}
 
         def contains_rto_marker(value: Any) -> bool:

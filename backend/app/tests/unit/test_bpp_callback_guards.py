@@ -295,6 +295,19 @@ def test_rto_detection_does_not_classify_buyer_return_tags():
     assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is False
 
 
+def test_rto_detection_does_not_classify_generic_cancel_request_tags():
+    payload = {
+        "message": {
+            "order": {
+                "fulfillments": [
+                    {"tags": [{"code": "cancel_request", "list": [{"code": "reason_id", "value": "001"}]}]}
+                ]
+            }
+        }
+    }
+    assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is False
+
+
 def test_rto_classification_persists_after_select_marker_is_gone():
     transaction_id = "opaque-rto-transaction"
     lifecycle_tracker.mark_rto_flow(transaction_id)
