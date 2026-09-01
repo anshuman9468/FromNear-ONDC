@@ -89,8 +89,12 @@ class LifecycleTracker:
         state = self._load_durable(transaction_id)
         if state is not None:
             local_task = self._store.get(transaction_id, {}).get("lifecycle_task")
+            local_rto_candidate = self._store.get(transaction_id, {}).get("rto_candidate", False)
             self._store[transaction_id] = state
             self._store[transaction_id]["lifecycle_task"] = local_task
+            # This discriminator only exists for the short-lived request
+            # window and must survive durable-state refreshes.
+            self._store[transaction_id]["rto_candidate"] = local_rto_candidate
         return self._store[transaction_id]
 
     def get_or_create(self, transaction_id: str) -> Dict[str, Any]:
@@ -104,6 +108,7 @@ class LifecycleTracker:
                 "track_requested": False,
                 "out_of_stock_flow": False,
                 "rto_flow": False,
+                "rto_candidate": False,
                 "sent_callbacks": set(),
                 "stored_order": None,
                 "stored_context": None,
@@ -212,6 +217,22 @@ class LifecycleTracker:
         self._refresh(transaction_id)
         self.get_or_create(transaction_id)["rto_flow"] = True
         self._persist_durable(transaction_id)
+
+    def mark_rto_candidate(self, transaction_id: str) -> None:
+        """Keep the short-lived ambiguous post-confirm branch open.
+
+        Workbench's merchant RTO fixture does not include an RTO marker in
+        select/init/confirm.  The next inbound /update is therefore the only
+        reliable discriminator.  This flag is intentionally ephemeral and is
+        not persisted as business state.
+        """
+        self.get_or_create(transaction_id)["rto_candidate"] = True
+
+    def clear_rto_candidate(self, transaction_id: str) -> None:
+        self.get_or_create(transaction_id)["rto_candidate"] = False
+
+    def is_rto_candidate(self, transaction_id: str) -> bool:
+        return bool(self.get_or_create(transaction_id).get("rto_candidate"))
 
     def is_rto_flow(self, transaction_id: str) -> bool:
         self.get_or_create(transaction_id)

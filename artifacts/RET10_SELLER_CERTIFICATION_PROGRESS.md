@@ -381,3 +381,58 @@ Verification before deployment:
 - RET10 lifecycle dry run: 12 callback payloads passed.
 - Buyer cancellation dry run: passed.
 - Catalog audit: all six checks passed.
+
+## Iteration 11: Supplied JFxl session comparison
+
+Session ID: `JFxl8BFnlg05sii2VhU8yLMgbCe-f6Ts`
+Deployment revision: live diagnostics confirms the current Cloud Run service is healthy; the browser session contains historical executions and is not a clean new certification run.
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Observed Workbench flow status:
+- Buyer Initiated Return: 100%
+- Buyer Side Order Cancellation: 100%
+- Discovery incremental catalog refresh pull: 100%
+- Merchant Side RTO and Part Order Cancellation: 86%, with retained out-of-sequence callback records
+- Order to confirm to fulfillment (Prepaid): 100%
+- Order to confirm to fulfillment Prepaid with IGM 1.0.0: 83%
+- Out of Stock: 100%
+- Search and Custom Menu (Full Catalog City): 100%
+- Search and Custom Menu (Incremental Push): 100%
+
+Certification status: not clean. The page does not show a single clean 100% session; RTO and IGM remain incomplete, and the RTO card retains 14 out-of-sequence records. Generate Report is disabled for this state.
+
+Backend comparison:
+- Live seller registry lookup: PASS; `ondc.fromnear.com` is `SUBSCRIBED` for Seller key ID `490ba361-51d0-49b7-8c00-182892758de9`.
+- Signing key derivation: PASS.
+- Callback route checks: PASS for all required Seller callbacks.
+- Gateway, subscriber reachability, and payload preflight: PASS.
+- No new backend payload defect is evidenced by this session; its remaining failures are incomplete/stale Workbench flow state and must be re-tested in a clean session before changing source.
+
+Next iteration objective:
+- Use a genuinely fresh Seller Workbench session, clear prior flow data, run catalog first, then run RTO and IGM from their first step, and generate the report. Do not use the 86%/83% page as final certification evidence.
+
+## Iteration 12: `seller(1).html` forensic comparison and deployed tag fix
+
+Report: `/home/anshumandutta/Downloads/seller(1).html`
+Report totals: 15,809 validations; 15,173 passed; 636 failed; 30 optional failures.
+Deployment revision: `fromnear-ondc-backend-00362-8s5` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged.
+
+Root-cause findings:
+- The report was generated before the current quote-tag correction. Product breakup lines were emitted with `item.tags.code=quote`, but RET10 1.2.0 requires the item taxonomy vocabulary for product lines; only fulfillment charge lines use `quote` metadata.
+- Repeated `bpp_id=workbench.ondc.tech` comparisons are Workbench/BAP input inconsistencies. The Seller callback identity must remain the registered `ondc.fromnear.com`; changing it would break registry consistency.
+- Large RTO/return callback clusters include incomplete/stale Workbench branches and malformed mock inputs; they cannot be treated as proof of a live Seller payload defect without a fresh request reaching Cloud Run.
+
+Code fix:
+- The order builder and final outbound canonicalizer now emit `type/item` tags for product breakup lines and `quote/fulfillment` tags for delivery lines.
+- The local RET10 validator and callback regression tests enforce the same line-specific vocabulary.
+
+Verification:
+- Full backend suite: `55 passed`.
+- Targeted callback/lifecycle suite: `19 passed`.
+- Live health: PASS.
+- Live diagnostics: configuration, registry, gateway, signature, subscriber, callback, and payload all PASS.
+
+Certification status: the supplied report is not a final post-fix report. A new Seller Workbench session must execute the applicable flows against revision `00362-8s5` before zero actionable BPP failures can be claimed.

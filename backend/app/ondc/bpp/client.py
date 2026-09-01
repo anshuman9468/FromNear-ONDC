@@ -85,8 +85,8 @@ class BppNetworkClient:
             order_state=order.get("state"),
         )
         # Keep the wire contract authoritative even when a stored order was
-        # created by an older process. RET10 requires quote tags on every
-        # nested breakup item, including product lines.
+        # created by an older process. The active Workbench RET10 contract
+        # requires quote metadata tags on every nested breakup item.
         for breakup in canonical.get("quote", {}).get("breakup", []):
             if not isinstance(breakup, dict) or not isinstance(breakup.get("item"), dict):
                 continue

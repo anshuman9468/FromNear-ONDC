@@ -150,16 +150,19 @@ def test_incremental_push_mode_is_detected_and_does_not_answer_final_search():
     assert unsolicited.await_count == 2
 
 
-def test_quote_breakup_items_use_ret10_line_tag_vocabulary():
+def test_quote_breakup_items_use_active_ret10_quote_tag_vocabulary():
     quote = build_canonical_quote([{"id": "I1", "quantity": {"count": 1}}])
     for breakup in quote["breakup"]:
         item = breakup["item"]
         assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
         assert isinstance(item["tags"], list) and item["tags"]
-        if breakup["@ondc/org/title_type"] == "item":
-            assert item["tags"][0] == {"code": "quote", "list": [{"code": "type", "value": "item"}]}
-        else:
-            assert item["tags"][0] == {"code": "quote", "list": [{"code": "type", "value": "fulfillment"}]}
+        assert item["tags"][0] == {
+            "code": "quote",
+            "list": [{
+                "code": "type",
+                "value": "fulfillment" if breakup["@ondc/org/title_type"] == "delivery" else "item",
+            }],
+        }
         assert isinstance(item["quantity"], dict)
         assert isinstance(item["quantity"]["selected"]["count"], int)
         assert isinstance(item["price"], dict)
@@ -169,7 +172,7 @@ def test_quote_breakup_items_use_ret10_line_tag_vocabulary():
             assert item["tags"][0]["list"][0]["value"] == "fulfillment"
 
 
-def test_network_guard_rewrites_legacy_quote_tags_from_stored_orders():
+def test_network_guard_rewrites_breakup_tags_to_active_ret10_vocab():
     message = BppNetworkClient._canonicalize_message(
         CONTEXT,
         "on_select",
@@ -192,9 +195,10 @@ def test_network_guard_rewrites_legacy_quote_tags_from_stored_orders():
         },
     )
 
-    assert message["order"]["quote"]["breakup"][0]["item"]["tags"] == [
-        {"code": "quote", "list": [{"code": "type", "value": "item"}]}
-    ]
+    assert message["order"]["quote"]["breakup"][0]["item"]["tags"] == [{
+        "code": "quote",
+        "list": [{"code": "type", "value": "item"}],
+    }]
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():
@@ -321,3 +325,17 @@ def test_lifecycle_tracker_keeps_async_task_handles_out_of_durable_state():
     state["lifecycle_task"] = object()
 
     assert "lifecycle_task" not in tracker._durable_fields()
+
+
+def test_rto_candidate_is_ephemeral_until_workbench_update_arrives():
+    tracker = LifecycleTracker()
+    transaction_id = "opaque-rto-candidate"
+
+    tracker.mark_rto_candidate(transaction_id)
+    assert tracker.is_rto_candidate(transaction_id) is True
+    assert tracker.is_rto_flow(transaction_id) is False
+
+    tracker.mark_rto_flow(transaction_id)
+    tracker.clear_rto_candidate(transaction_id)
+    assert tracker.is_rto_flow(transaction_id) is True
+    assert tracker.is_rto_candidate(transaction_id) is False

@@ -126,3 +126,13 @@ This closes the registry and diagnostics-tooling blockers observed in earlier it
 | HTTP gzip content was parsed as JSON bytes | BAP callback ingress | Repeated in earlier live logs | 0 after deployment | Fixed and live-verified | `backend/app/api/endpoints/ondc.py` | Decode gzip/deflate before signature validation and JSON parsing; add integration regression test. |
 
 Current session `Ed2abHsNVZSDuPHlLc898KPCWTxCEblX`: cancellation, discovery pull, IGM prepaid, and standard prepaid completed at 100% with ACKs. Return and RTO were blocked by Workbench/mock sequencing; Out of Stock blocked before its second mock request; catalog flows were not executed because the session remained active on that step.
+
+## Iteration 12: supplied `seller(1).html`
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Product breakup lines used the fulfillment `quote` tag vocabulary | confirm/on_confirm and downstream order callbacks | Repeated | Repeated in 636-failure report | Fixed in source and deployed | Shared quote builder/network canonicalizer | Emit `type`/`item` for product lines; keep `quote`/`fulfillment` only for delivery lines. |
+| BPP identity compared against Workbench BAP identity | select and callback context checks | Repeated | Repeated | Not a Seller defect | Workbench/BAP fixture | Keep registered Seller `bpp_id=ondc.fromnear.com`; do not replace it with `workbench.ondc.tech`. |
+| Missing callback structures in stale/incomplete RTO and return branches | RTO/return on_update/on_status | Repeated | Clustered in report | Requires fresh execution evidence | Workbench state/mock sequencing | Re-test from a clean session after valid mock requests reach the Seller endpoint. |
+
+Current supplied report totals: 15,809 validations; 15,173 passed; 636 failed; 30 optional failures. It predates revision `fromnear-ondc-backend-00362-8s5`; it is not evidence of the deployed tag fix.

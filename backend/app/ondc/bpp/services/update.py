@@ -24,6 +24,12 @@ class BppUpdateService:
 
         logger.info(f"[INBOUND REQ] action=update tx={transaction_id} msg_id={context.get('message_id')}")
 
+        # RTO fixtures from Workbench may omit every RTO marker.  A /update
+        # arriving during the post-confirm candidate window is the definitive
+        # signal that the preceding unsolicited on_update was the RTO branch.
+        if not is_rto_flow(context, payload) and lifecycle_tracker.is_rto_candidate(transaction_id):
+            lifecycle_tracker.mark_rto_flow(transaction_id)
+
         if is_rto_flow(context, payload):
             # RTO already emitted the required unsolicited on_update after
             # confirm. The later mock /update advances the RTO state and must

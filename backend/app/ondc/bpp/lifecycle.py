@@ -31,6 +31,11 @@ PREPAID_POST_TRACK_STATUS_SEQUENCE = [
     RET10_FULFILLMENT_STATE["DELIVERED"],
 ]
 
+# The merchant RTO Workbench fixture sends an opaque, otherwise ordinary
+# confirm and then waits for an unsolicited on_update.  Keep this window
+# short so normal delivery flows still fall back to their normal status path.
+RTO_DISAMBIGUATION_WINDOW_SECONDS = 8.0
+
 RTO_STATUS_SEQUENCE = [
     RET10_FULFILLMENT_STATE["RTO_INITIATED"],
     RET10_FULFILLMENT_STATE["RTO_DISPOSED"],
@@ -243,6 +248,40 @@ async def push_post_confirm_lifecycle(
             await _send_lifecycle_callback(context, "on_status", status_order, unsolicited=True)
             lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)
         return
+
+    # Some Workbench RTO scenarios contain no RTO marker in the inbound
+    # lifecycle requests.  Emit the required callback first and use the next
+    # inbound /update as the discriminator.  If no update arrives, continue
+    # with the normal delivery status sequence instead of permanently
+    # classifying the order as RTO.
+    lifecycle_tracker.mark_rto_candidate(transaction_id)
+    candidate_order = build_canonical_order(
+        action="on_update",
+        payload=payload,
+        state_code=RET10_FULFILLMENT_STATE["PACKED"],
+        order_id=order_id,
+        created_at=created_at,
+        updated_at=_now(),
+        stored_order=stored_order,
+        order_state="In-progress",
+    )
+    await _send_lifecycle_callback(context, "on_update", candidate_order, unsolicited=True)
+    lifecycle_tracker.record_callback(
+        transaction_id,
+        "on_update",
+        RET10_FULFILLMENT_STATE["PACKED"],
+    )
+    try:
+        elapsed = 0.0
+        while elapsed < RTO_DISAMBIGUATION_WINDOW_SECONDS:
+            await asyncio.sleep(0.5)
+            elapsed += 0.5
+            if lifecycle_tracker.is_cancelled(transaction_id):
+                return
+            if lifecycle_tracker.is_rto_flow(transaction_id):
+                return
+    finally:
+        lifecycle_tracker.clear_rto_candidate(transaction_id)
 
     # Give a buyer-side /cancel a chance to arrive before starting the generic
     # delivery-status stream. The cancellation scenario does not permit an
