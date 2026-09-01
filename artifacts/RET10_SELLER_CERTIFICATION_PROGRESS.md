@@ -174,6 +174,27 @@ Failed or incomplete remote flows:
 - Out-of-stock remains incomplete at step 3 in the existing session; the BPP logs showed the earlier callback was HTTP 200/ACK, but Workbench did not advance the second select step.
 - IGM flow remains incomplete at the optional issue branch in the existing session.
 
+## Iteration 13: Offer tag shape
+
+Session ID: historical report only; fresh remote confirmation pending
+Deployment revision: `fromnear-ondc-backend-00368-qgp` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- Full backend test suite: `58 passed`.
+- Catalog normalizer now emits `offers[*].tags` as an array for sparse and real catalog fixtures.
+
+Failed validations:
+- Historical RTO `select` reports contain `message.order.offers[0].tags should be a array`.
+
+Fixed since prior run:
+- Added `tags: []` to the checked-in `O1` offer fixture.
+- Added regression tests for normalized and source offer tag shape.
+
+Next iteration objective:
+- Rerun the RTO flow from a fresh Workbench session and confirm the historical offer-tag failure is absent from the live request.
+
 Fixed since prior run:
 - Prevented catalog quantity metadata from overwriting the numeric requested quantity while building `quote.breakup[*].item.quantity.selected.count`.
 - Added a regression assertion that every quote breakup selected count is an integer.

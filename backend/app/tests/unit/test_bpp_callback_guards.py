@@ -81,6 +81,35 @@ def test_catalog_normalizer_supplies_bpp_descriptor_and_food_statutory_data():
     assert location_range == {"start": "0900", "end": "2100"}
 
 
+def test_catalog_normalizer_preserves_offer_tags_for_workbench_select_inputs():
+    catalog = _normalize_catalog_quantities(
+        {
+            "bpp/providers": [
+                {
+                    "id": "P1",
+                    "locations": [{"id": "L1"}],
+                    "items": [{"id": "I1", "descriptor": {"name": "Rice"}}],
+                    "offers": [{"id": "O1", "descriptor": {"name": "Store offer"}}],
+                }
+            ]
+        }
+    )
+
+    offer = catalog["bpp/providers"][0]["offers"][0]
+    assert offer["id"] == "O1"
+    assert isinstance(offer["tags"], list)
+
+
+def test_source_catalog_offer_has_tags_array():
+    from pathlib import Path
+    import json
+
+    catalog_path = Path(__file__).parents[2] / "ondc" / "bpp" / "catalog" / "mock_catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    offer = catalog["bpp/providers"][0]["offers"][0]
+    assert isinstance(offer.get("tags"), list)
+
+
 def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_location():
     catalog = _normalize_catalog_quantities(
         {

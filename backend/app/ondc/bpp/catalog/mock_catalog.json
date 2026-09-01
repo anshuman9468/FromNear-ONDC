@@ -230,7 +230,8 @@
           "id": "O1",
           "descriptor": {
             "name": "5% Off on First Order"
-          }
+          },
+          "tags": []
         }
       ],
       "tags": [

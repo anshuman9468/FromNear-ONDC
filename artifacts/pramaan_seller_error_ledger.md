@@ -136,3 +136,11 @@ Current session `Ed2abHsNVZSDuPHlLc898KPCWTxCEblX`: cancellation, discovery pull
 | Missing callback structures in stale/incomplete RTO and return branches | RTO/return on_update/on_status | Repeated | Clustered in report | Requires fresh execution evidence | Workbench state/mock sequencing | Re-test from a clean session after valid mock requests reach the Seller endpoint. |
 
 Current supplied report totals: 15,809 validations; 15,173 passed; 636 failed; 30 optional failures. It predates revision `fromnear-ondc-backend-00362-8s5`; it is not evidence of the deployed tag fix.
+
+## Iteration 13: offer tag shape
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Offer `O1` was defined without the `tags` array used by Workbench when it builds the RTO `select` request | RTO and Part Cancellation / `select` request verification | Persistent across supplied reports | 1 normalized failure pattern | Fixed in source and deployed in `fromnear-ondc-backend-00368-qgp`; requires a fresh Workbench session for remote confirmation | Catalog fixture and shared catalog normalizer | Add `tags: []` to the source offer and assert the normalizer always emits an array for every offer. |
+
+Local verification: full backend test suite `58 passed`. The current supplied report remains historical evidence; it must not be edited or treated as proof of the new deployment.
