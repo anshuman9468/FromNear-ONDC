@@ -817,6 +817,21 @@ class UpdateRequestBuilder(BaseRequestBuilder):
                 new_fulfillments.append(f_copy)
             msg_order["fulfillments"] = new_fulfillments
 
+        # RET10 update requests always carry at least one fulfillment.  A
+        # sparse cached order can otherwise serialize as `fulfillments: []`,
+        # which fails before the BPP receives the request.
+        if not isinstance(msg_order.get("fulfillments"), list) or not msg_order["fulfillments"]:
+            fallback = {
+                "id": "F1",
+                "type": "Return" if update_target == "fulfillment" else "Delivery",
+                "tracking": False,
+                "tags": [{
+                    "code": "return_request",
+                    "list": [{"code": "id", "value": "F1"}],
+                }],
+            }
+            msg_order["fulfillments"] = [_complete_bap_fulfillment(fallback)]
+
         if isinstance(msg_order.get("payment"), dict):
             msg_order["payment"] = _complete_settlements(
                 msg_order["payment"], transaction_id, context["timestamp"]

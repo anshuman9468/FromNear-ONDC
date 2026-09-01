@@ -457,3 +457,34 @@ Verification:
 - Live diagnostics: configuration, registry, gateway, signature, subscriber, callback, and payload all PASS.
 
 Certification status: the supplied report is not a final post-fix report. A new Seller Workbench session must execute the applicable flows against revision `00362-8s5` before zero actionable BPP failures can be claimed.
+
+## Iteration 14: BAP update fulfillment floor
+
+Session ID: not created; source fix and local verification only
+Deployment revision: `fromnear-ondc-backend-00369-88z` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Observed failure:
+- `retail_bap_update_message_05_minItems`: `message.order.fulfillments` was `[]` but must contain at least one item.
+
+Root cause:
+- The BAP `UpdateService` did not add its fallback fulfillment for `update_target="fulfillment"`.
+- `UpdateRequestBuilder` then preserved an empty or missing fulfillment list instead of enforcing the RET10 minimum.
+
+Code fix:
+- `UpdateService` now creates a Return fulfillment whenever normalization produces none.
+- `UpdateRequestBuilder` now guarantees one fully normalized `F1` fulfillment for both item and fulfillment update targets.
+- Added parametrized regression coverage for both update targets.
+
+Verification:
+- Targeted protocol/BPP tests: `32 passed`.
+- Full backend suite: `60 passed`.
+- Only existing Pydantic deprecation warnings remain.
+
+Certification status:
+- The supplied screenshot is a request-verification failure. It is not proof that the BPP callback builder emitted an empty list.
+- The change is deployed and health-checked; use a fresh Workbench session and rerun the Update Settlement Trail/RTO path. A fresh report is required to confirm the live result.
+
+Next iteration objective:
+- Deploy and verify the revision, then rerun the exact Workbench flow from a clean session. If the report still shows the same request-side failure without an application `/update` request, capture the Workbench mock payload as an external fixture issue.

@@ -7,6 +7,7 @@ from app.ondc.protocol.builders import (
     TrackRequestBuilder,
     CancelRequestBuilder,
     SupportRequestBuilder,
+    UpdateRequestBuilder,
 )
 from app.ondc.protocol.parsers import (
     SelectResponse,
@@ -142,6 +143,25 @@ def test_support_request_builder():
     )
     assert payload["context"]["action"] == "support"
     assert payload["message"]["ref_id"] == "ref-123"
+
+
+@pytest.mark.parametrize("update_target", ["item", "fulfillment"])
+def test_update_request_builder_never_emits_empty_fulfillments(update_target):
+    payload = UpdateRequestBuilder.build(
+        transaction_id="tx-123",
+        message_id="msg-123",
+        bpp_id="bpp-1",
+        bpp_uri="https://bpp-1.com",
+        order_id="order-123",
+        update_target=update_target,
+        order={"id": "order-123", "items": [{"id": "I1"}], "fulfillments": []},
+    )
+
+    fulfillments = payload["message"]["order"]["fulfillments"]
+    assert len(fulfillments) >= 1
+    assert fulfillments[0]["id"] == "F1"
+    assert fulfillments[0]["type"] in {"Delivery", "Return"}
+    assert isinstance(fulfillments[0]["tags"], list)
 
 
 def test_select_response_parser():

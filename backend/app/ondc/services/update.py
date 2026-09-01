@@ -126,7 +126,7 @@ class UpdateService:
             f_copy["tags"] = filtered_tags
             cleaned_fulfillments.append(f_copy)
 
-        if not has_return_tag and update_target != "fulfillment":
+        if not cleaned_fulfillments:
             return_fulfillment = {
                 "id": fulfillment_id_val,
                 "type": "Return",

@@ -144,3 +144,11 @@ Current supplied report totals: 15,809 validations; 15,173 passed; 636 failed; 3
 | Offer `O1` was defined without the `tags` array used by Workbench when it builds the RTO `select` request | RTO and Part Cancellation / `select` request verification | Persistent across supplied reports | 1 normalized failure pattern | Fixed in source and deployed in `fromnear-ondc-backend-00368-qgp`; requires a fresh Workbench session for remote confirmation | Catalog fixture and shared catalog normalizer | Add `tags: []` to the source offer and assert the normalizer always emits an array for every offer. |
 
 Local verification: full backend test suite `58 passed`. The current supplied report remains historical evidence; it must not be edited or treated as proof of the new deployment.
+
+## Iteration 14: empty update fulfillment array
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| Sparse BAP update orders could preserve `fulfillments: []`; the update builder also skipped its fallback for `update_target=fulfillment` | Update Settlement Trail / BAP `/update` request verification | 1 visible normalized failure (repeated across report runs) | 0 in local regression | Fixed in source; deployment and fresh Workbench confirmation pending | `UpdateService` and `UpdateRequestBuilder` | Always synthesize one normalized fulfillment (`F1`) when the source order has no fulfillments; use `Return` for fulfillment-targeted updates and preserve valid tags. |
+
+Verification: full backend suite `60 passed`; targeted update/protocol and BPP callback suite `32 passed`. This fixes the application-generated BAP update path. If the same failure appears in a Seller Workbench report before any `/update` request reaches this service, the malformed mock payload is Workbench-side and requires a fresh flow/input reset rather than another BPP response change.
