@@ -134,6 +134,52 @@ def is_buyer_cancel_flow(context: Dict[str, Any] | None = None) -> bool:
     return "buyer_cancel" in flow_hint or "buyer-cancellation" in flow_hint
 
 
+def is_buyer_return_flow(
+    context: Dict[str, Any], payload: Dict[str, Any] | None = None
+) -> bool:
+    """Identify the buyer-return fixture before post-confirm pushes begin.
+
+    Workbench's buyer-return confirm has a normal Delivery fulfillment, so the
+    Return marker is only present on the later /update.  Its seller terms tag
+    is present but empty, unlike the merchant-RTO fixture which contains the
+    populated BPP terms needed for the opaque RTO branch.
+    """
+    order = (payload or {}).get("message", {}).get("order", {})
+    if not isinstance(order, dict):
+        return False
+
+    def has_tag_code(tags: Any, code: str) -> bool:
+        return any(
+            isinstance(tag, dict) and tag.get("code") == code
+            for tag in (tags if isinstance(tags, list) else [])
+        )
+
+    fulfillments = order.get("fulfillments", [])
+    if any(
+        isinstance(fulfillment, dict)
+        and (
+            fulfillment.get("type") == "Return"
+            or has_tag_code(fulfillment.get("tags"), "return_request")
+        )
+        for fulfillment in (fulfillments if isinstance(fulfillments, list) else [])
+    ):
+        return True
+
+    for item in order.get("items", []):
+        if isinstance(item, dict) and has_tag_code(item.get("tags"), "return_request"):
+            return True
+
+    bpp_terms = next(
+        (
+            tag
+            for tag in order.get("tags", [])
+            if isinstance(tag, dict) and tag.get("code") == "bpp_terms"
+        ),
+        None,
+    )
+    return isinstance(bpp_terms, dict) and bpp_terms.get("list") == []
+
+
 def is_out_of_stock_flow(transaction_id: str | None = None) -> bool:
     mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
     if mode in {"out_of_stock", "oos"}:
@@ -244,6 +290,29 @@ async def push_post_confirm_lifecycle(
                 updated_at=_now(),
                 stored_order=stored_order,
                 order_state="In-progress",
+            )
+            await _send_lifecycle_callback(context, "on_status", status_order, unsolicited=True)
+            lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)
+        return
+
+    if is_buyer_return_flow(context, payload):
+        # Buyer-return flows have status pushes before the buyer's /update.
+        # Do not use the ambiguous RTO candidate callback here: Workbench
+        # treats that callback as out-of-sequence and waits for on_update only
+        # after the later inbound update request.
+        for state_code in [RET10_FULFILLMENT_STATE["PENDING"], *PREPAID_STATUS_SEQUENCE]:
+            await asyncio.sleep(0.5)
+            if lifecycle_tracker.is_cancelled(transaction_id):
+                return
+            status_order = build_canonical_order(
+                action="on_status",
+                payload=payload,
+                state_code=state_code,
+                order_id=order_id,
+                created_at=created_at,
+                updated_at=_now(),
+                stored_order=stored_order,
+                order_state="Completed" if state_code == RET10_FULFILLMENT_STATE["DELIVERED"] else "In-progress",
             )
             await _send_lifecycle_callback(context, "on_status", status_order, unsolicited=True)
             lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)

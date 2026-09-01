@@ -12,7 +12,7 @@ from app.ondc.bpp.services.search import (
     _is_incremental_push,
     _normalize_catalog_quantities,
 )
-from app.ondc.bpp.lifecycle import is_rto_flow
+from app.ondc.bpp.lifecycle import is_buyer_return_flow, is_rto_flow
 from app.ondc.bpp.state_machine import LifecycleTracker, lifecycle_tracker
 
 
@@ -339,6 +339,23 @@ def test_rto_detection_does_not_classify_generic_cancel_request_tags():
         }
     }
     assert is_rto_flow({"transaction_id": "opaque-workbench-transaction"}, payload) is False
+
+
+def test_buyer_return_fixture_is_not_given_an_early_rto_update():
+    payload = {
+        "message": {
+            "order": {
+                "items": [{"id": "I1"}, {"id": "I2"}],
+                "fulfillments": [{"type": "Delivery"}],
+                "tags": [
+                    {"code": "bpp_terms", "list": []},
+                    {"code": "bap_terms", "list": [{"code": "accept_bpp_terms", "value": "Y"}]},
+                ],
+            }
+        }
+    }
+
+    assert is_buyer_return_flow(CONTEXT, payload) is True
 
 
 def test_rto_classification_persists_after_select_marker_is_gone():
