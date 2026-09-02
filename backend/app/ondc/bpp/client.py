@@ -91,13 +91,13 @@ class BppNetworkClient:
             if not isinstance(breakup, dict) or not isinstance(breakup.get("item"), dict):
                 continue
             title_type = breakup.get("@ondc/org/title_type")
-            if title_type == "item":
-                breakup["item"]["tags"] = [{
+            breakup["item"]["tags"] = [{
+                "code": "quote",
+                "list": [{
                     "code": "type",
-                    "list": [{"code": "type", "value": "item"}],
-                }]
-            else:
-                breakup["item"].pop("tags", None)
+                    "value": "fulfillment" if title_type == "delivery" else "item",
+                }],
+            }]
         # Lifecycle-specific fields are not part of the generic order builder.
         if isinstance(order.get("cancellation"), dict):
             canonical["cancellation"] = order["cancellation"]
