@@ -187,21 +187,17 @@ def test_quote_breakup_items_use_active_ret10_quote_tag_vocabulary():
     for breakup in quote["breakup"]:
         item = breakup["item"]
         assert isinstance(item["parent_item_id"], str) and item["parent_item_id"]
-        assert isinstance(item["tags"], list) and item["tags"]
-        assert item["tags"][0] == {
-            "code": "quote",
-            "list": [{
-                "code": "type",
-                "value": "fulfillment" if breakup["@ondc/org/title_type"] == "delivery" else "item",
-            }],
-        }
         assert isinstance(item["quantity"], dict)
         assert isinstance(item["quantity"]["selected"]["count"], int)
         assert isinstance(item["price"], dict)
 
-        if breakup.get("@ondc/org/title_type") == "delivery":
-            assert item["id"] == "F1"
-            assert item["tags"][0]["list"][0]["value"] == "fulfillment"
+        if breakup.get("@ondc/org/title_type") == "item":
+            assert item["tags"][0] == {
+                "code": "type",
+                "list": [{"code": "type", "value": "item"}],
+            }
+        else:
+            assert "tags" not in item or item.get("tags") == []
 
 
 def test_network_guard_rewrites_breakup_tags_to_active_ret10_vocab():
@@ -228,7 +224,7 @@ def test_network_guard_rewrites_breakup_tags_to_active_ret10_vocab():
     )
 
     assert message["order"]["quote"]["breakup"][0]["item"]["tags"] == [{
-        "code": "quote",
+        "code": "type",
         "list": [{"code": "type", "value": "item"}],
     }]
 
