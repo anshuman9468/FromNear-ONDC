@@ -232,7 +232,9 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
                 if isinstance(tag, dict) and tag.get("code") in ALLOWED_ITEM_TAG_CODES
             ]
             if not item["tags"]:
-                item["tags"] = DEFAULT_ITEM_TAGS
+                # Give each item its own copy so a later serializer cannot
+                # mutate the shared fallback for every catalog item.
+                item["tags"] = copy.deepcopy(DEFAULT_ITEM_TAGS)
 
         raw_creds = provider.get("creds") if isinstance(provider.get("creds"), list) else [{}]
         provider["creds"] = [

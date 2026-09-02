@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 from app.ondc.protocol.builders import (
     SelectRequestBuilder,
@@ -18,6 +21,7 @@ from app.ondc.protocol.parsers import (
     CancelResponse,
     SupportResponse,
 )
+from app.ondc.bpp.services.search import _normalize_catalog_quantities
 
 
 def test_select_request_builder_normalizes_workbench_items():
@@ -48,7 +52,7 @@ def test_select_request_builder_normalizes_workbench_items():
         assert item["fulfillment_id"] == "F1"
         assert item["parent_item_id"] == "V1"
         assert item["quantity"] == {"count": expected_count}
-        assert item["tags"] == [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
+        assert item["tags"] == []
 
 
 def test_init_request_builder():
@@ -92,7 +96,7 @@ def test_confirm_request_builder():
         assert item["location_id"] == "L1"
         assert "location" not in item
         assert item["parent_item_id"] == "V1"
-        assert item["tags"]
+        assert isinstance(item["tags"], list)
 
 
 def test_status_request_builder():
@@ -206,6 +210,38 @@ def test_select_request_builder_resolves_catalog_identity_for_every_item():
     ]
     assert all("location" not in item and "catalog_item" not in item for item in items)
     assert payload["message"]["order"]["provider"]["locations"] == [{"id": "L1"}, {"id": "L2"}]
+
+
+def test_select_request_builder_preserves_normalized_catalog_tags_for_every_item():
+    catalog_path = Path(__file__).parents[2] / "ondc" / "bpp" / "catalog" / "mock_catalog.json"
+    catalog = _normalize_catalog_quantities(json.loads(catalog_path.read_text()))
+    catalog_items = {
+        item["id"]: item for item in catalog["bpp/providers"][0]["items"]
+    }
+
+    payload = SelectRequestBuilder.build(
+        transaction_id="tx-catalog-tags",
+        message_id="msg-catalog-tags",
+        bpp_id="bpp-1",
+        bpp_uri="https://bpp-1.com",
+        provider_id="provider-1",
+        items=[
+            {"id": "I1", "quantity": 1, "catalog_item": catalog_items["I1"]},
+            {"id": "I2", "quantity": 2, "catalog_item": catalog_items["I2"]},
+        ],
+    )
+
+    selected_items = payload["message"]["order"]["items"]
+    assert len(selected_items) == 2
+    for selected, item_id in zip(selected_items, ("I1", "I2")):
+        assert selected["id"] == item_id
+        assert selected["location_id"] == catalog_items[item_id]["location_id"]
+        assert selected["parent_item_id"] == catalog_items[item_id]["parent_item_id"]
+        assert selected["fulfillment_id"] == catalog_items[item_id]["fulfillment_id"]
+        assert isinstance(selected["tags"], list)
+        assert selected["tags"] == catalog_items[item_id]["tags"]
+        assert "location" not in selected
+        assert "catalog_item" not in selected
 
 
 def test_select_request_builder_rejects_item_without_catalog_identity():

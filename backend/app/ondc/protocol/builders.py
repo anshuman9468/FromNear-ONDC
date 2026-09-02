@@ -1,3 +1,4 @@
+import copy
 import uuid
 import datetime
 from datetime import timezone
@@ -50,6 +51,26 @@ def _ret10_quote_tags(kind: str) -> List[Dict[str, Any]]:
     return [{"code": "quote", "list": [{"code": "type", "value": value}]}]
 
 
+def _select_item_tags(item: Dict[str, Any], catalog_item: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Carry catalog item tags into every outbound RET10 order item.
+
+    The on_search catalog is authoritative when it explicitly contains a
+    tags array, including an intentionally empty array. This avoids replacing
+    catalog metadata with a guessed tag while still guaranteeing the shape
+    required by the active Workbench select schema.
+    """
+    if isinstance(catalog_item, dict) and "tags" in catalog_item:
+        catalog_tags = catalog_item.get("tags")
+        if isinstance(catalog_tags, list):
+            return copy.deepcopy(catalog_tags)
+
+    incoming_tags = item.get("tags") if isinstance(item, dict) else None
+    if isinstance(incoming_tags, list):
+        return copy.deepcopy(incoming_tags)
+
+    return []
+
+
 def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
     """Normalize the item shape reused by select, init, confirm, and update."""
     normalized = dict(item) if isinstance(item, dict) else {}
@@ -64,8 +85,7 @@ def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict
     # field because Workbench validates the canonical representation.
     normalized.pop("location", None)
     normalized["quantity"] = {"count": get_item_count(normalized.get("quantity"))}
-    if not isinstance(normalized.get("tags"), list) or not normalized["tags"]:
-        normalized["tags"] = [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
+    normalized["tags"] = _select_item_tags(normalized, catalog_item)
     return normalized
 
 
