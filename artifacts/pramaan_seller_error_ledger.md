@@ -163,3 +163,11 @@ Verification: full backend suite `60 passed`; targeted update/protocol and BPP c
 Local verification for this iteration: `63 passed` in `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest app/tests -q`; focused select/lifecycle verification: `40 passed`.
 
 No Workbench report was generated in this code-only iteration, so a zero-error remote certification result is not claimed here. The final proof still requires a new Seller RET10 Grocery session against the deployed revision.
+
+## Iteration 16: deployment verification
+
+- Commit: `e7c79e8` (`fix(ondc): correct select item location and parent identifiers`).
+- Deployment: Cloud Run revision `fromnear-ondc-backend-00371-wsd`, serving 100% traffic for `fromnear-ondc-backend` in `us-central1`.
+- Runtime checks: `/api/v1/health` returned healthy; non-secret ONDC diagnostics reported `configuration`, `registry`, `gateway`, `signature`, `subscriber`, `callback`, and `payload` as `PASS`.
+- Environment safety: deployment supplied no environment override flags; existing BAP/BPP environment variables and secrets were retained.
+- Certification status: no new Workbench report was generated in this iteration. A fresh Seller RET10 Grocery session must still validate the wire payload and all applicable flows.

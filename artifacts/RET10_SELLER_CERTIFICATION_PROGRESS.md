@@ -541,3 +541,34 @@ Tests added/updated:
 
 Next iteration objective:
 - Commit, deploy using the existing Cloud Run service, verify the serving revision and health endpoint, then run a fresh Workbench Seller session and compare its report against this ledger.
+
+## Iteration 16: deployment verification
+
+Session ID: not created; fresh Workbench certification remains pending
+Deployment revision: `fromnear-ondc-backend-00371-wsd` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- Commit `e7c79e8` created with the canonical `/select` identity fix and regression coverage.
+- Cloud Run revision is ready and serving 100% traffic.
+- `/api/v1/health` reports healthy service and database.
+- Non-secret ONDC diagnostics report configuration, registry, gateway, signature, subscriber, callback, and payload PASS.
+
+Failed validations:
+- No new Workbench report was generated in this iteration.
+
+Flows passed: local application suite only; remote Seller flows require a fresh Workbench session
+Flows failed: none locally; remote status unverified
+Flows newly reached: none remotely
+
+Fixed since prior run:
+- Deployed the shared catalog identity and select lifecycle fix without replacing existing environment configuration.
+
+Persistent:
+- A fresh Workbench Seller RET10 Grocery run is required for final remote certification.
+
+Regressions: none observed in the full local suite or deployment health checks.
+
+Next iteration objective:
+- Create a fresh Seller RET10 Grocery Workbench session, disable Header Validation in Workbench only, execute all applicable flows, generate the report, and compare every failed assertion against this ledger.
