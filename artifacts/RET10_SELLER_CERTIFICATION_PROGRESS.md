@@ -572,3 +572,55 @@ Regressions: none observed in the full local suite or deployment health checks.
 
 Next iteration objective:
 - Create a fresh Seller RET10 Grocery Workbench session, disable Header Validation in Workbench only, execute all applicable flows, generate the report, and compare every failed assertion against this ledger.
+
+## Iteration 17: select item tag retention
+
+Session ID: not created; fresh Workbench certification remains pending
+Deployment revision: `fromnear-ondc-backend-00372-vqj` (100% traffic)
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- Focused protocol and BPP callback suite: `36 passed`.
+- Full backend application suite: `64 passed`.
+- Representative two-item select preflight passed all identity and tag-shape assertions.
+
+Failed validations:
+- No new Workbench report was generated in this iteration.
+
+Flows passed: local catalog normalization, `/select`, `/init`, `/confirm`, and `/update` item serialization coverage
+Flows failed: none in the local application suite
+Flows newly reached: none remotely
+
+Fixed since prior run:
+- Shared BAP item serialization now preserves explicit catalog item tags for every selected item.
+- Explicit empty catalog tag arrays remain empty instead of being replaced by a guessed synthetic tag.
+- Caller-provided tags are retained when no catalog tag array is attached.
+- BPP fallback tags are deep-copied per catalog item.
+- Prompt 1 canonical identity fields remain unchanged: `location_id`, catalog-derived `parent_item_id`, and catalog-derived `fulfillment_id`; legacy item `location` is still removed.
+
+Persistent:
+- A fresh Workbench Seller RET10 Grocery run and report are still required to confirm the remote validator result.
+
+Regressions: none in focused or full local suites.
+
+Root cause:
+1. `_complete_bap_item` ignored `catalog_item.tags` after catalog enrichment and always substituted a synthetic tag when tags were absent on the incoming item.
+
+Code changes:
+- `backend/app/ondc/protocol/builders.py`
+- `backend/app/ondc/bpp/services/search.py`
+- `backend/app/tests/unit/test_order_protocol.py`
+
+Tests added/updated:
+- Multi-item regression loads the normalized production mock catalog and asserts both `I1` and `I2` preserve tags and canonical identity.
+- Legacy Workbench-shaped request tests now assert the required array type rather than requiring fabricated metadata.
+
+Deployment verification:
+- Commit `39b32d4` pushed to `origin/main`.
+- Existing Cloud Run service `fromnear-ondc-backend` in project `studio-6464285995-59fdf`, region `us-central1`, serves revision `fromnear-ondc-backend-00372-vqj` at 100% traffic.
+- Health endpoint: PASS.
+- ONDC diagnostics: configuration, registry, gateway, signature, subscriber, callback, and payload all PASS.
+
+Next iteration objective:
+- Run a fresh Seller Workbench session against revision `00372-vqj`, execute all applicable flows, generate the report, and classify any remaining remote failures before making further code changes.
