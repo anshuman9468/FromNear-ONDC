@@ -295,6 +295,54 @@ def test_final_wire_on_cancel_uses_post_order_item_tag_vocabulary_for_multiple_i
     )
 
 
+def test_final_wire_on_status_retains_quote_item_tag_vocabulary(monkeypatch):
+    """The status callback has a different breakup tag rule than on_cancel."""
+    network = BppNetworkClient()
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self):
+            return None
+
+    async def capture_post(url, *, content, headers):
+        captured["content"] = content
+        return FakeResponse()
+
+    monkeypatch.setattr(network.client, "post", capture_post)
+    asyncio.run(network._post(
+        CONTEXT,
+        "on_status",
+        {
+            "order": {
+                "id": "ORDER-WIRE-STATUS",
+                "state": "In-progress",
+                "items": [
+                    {"id": "I1", "quantity": {"count": 1}},
+                    {"id": "I2", "quantity": {"count": 1}},
+                ],
+                "fulfillments": [{
+                    "id": "F1",
+                    "type": "Delivery",
+                    "state": {"descriptor": {"code": "Packed"}},
+                }],
+            }
+        },
+        unsolicited=True,
+    ))
+
+    payload = json.loads(captured["content"])
+    breakup = payload["message"]["order"]["quote"]["breakup"]
+    product_lines = [entry for entry in breakup if entry["@ondc/org/title_type"] == "item"]
+    assert len(product_lines) == 2
+    assert all(line["item"]["tags"] == [{
+        "code": "quote",
+        "list": [{"code": "type", "value": "item"}],
+    }] for line in product_lines)
+
+
 def test_final_wire_post_order_callbacks_retain_originating_context(monkeypatch):
     from app.ondc.bpp.lifecycle import _send_lifecycle_callback
 
@@ -384,12 +432,15 @@ def test_post_order_breakup_tag_policy_is_action_specific():
             if entry["@ondc/org/title_type"] == "item"
         ]
         assert len(product_lines) == 2
-        assert all(line["item"]["tags"][0]["code"] == "type" for line in product_lines)
-        assert all(
-            tag.get("code") != "quote"
-            for line in order["quote"]["breakup"]
-            for tag in line["item"].get("tags", [])
-        )
+        if action == "on_cancel":
+            assert all(line["item"]["tags"][0]["code"] == "type" for line in product_lines)
+            assert all(
+                tag.get("code") != "quote"
+                for line in order["quote"]["breakup"]
+                for tag in line["item"].get("tags", [])
+            )
+        else:
+            assert all(line["item"]["tags"][0]["code"] == "quote" for line in product_lines)
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():

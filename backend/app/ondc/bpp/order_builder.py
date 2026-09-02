@@ -53,17 +53,16 @@ DEFAULT_QUOTE_ITEM_TAGS = [
     }
 ]
 
-POST_ORDER_CALLBACK_ACTIONS = {"on_status", "on_update", "on_cancel"}
+ON_CANCEL_BREAKUP_ACTIONS = {"on_cancel"}
 
 
 def _quote_breakup_item_tags(action: str, quote_type: str) -> List[Dict[str, Any]]:
     """Return the tag vocabulary valid for this callback's breakup line.
 
-    RET10 uses different tag namespaces for product and fulfillment breakup
-    lines.  In particular, post-order callbacks must not reuse the
-    fulfillment ``quote`` tag on product lines.
+    RET10 uses an action-specific tag namespace for cancellation breakup
+    lines.  Other lifecycle callbacks retain the standard ``quote`` tag.
     """
-    if action in POST_ORDER_CALLBACK_ACTIONS:
+    if action in ON_CANCEL_BREAKUP_ACTIONS:
         if quote_type == "fulfillment":
             return []
         return [{
@@ -879,7 +878,7 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if "tags" in item and not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item tags must be an array")
         elif isinstance(item.get("tags"), list):
-            if action in POST_ORDER_CALLBACK_ACTIONS:
+            if action in ON_CANCEL_BREAKUP_ACTIONS:
                 allowed_quote_tag_codes = {
                     "type", "parent", "child", "origin", "veg_nonveg", "custom_group"
                 }
@@ -893,7 +892,7 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "quote" and action not in POST_ORDER_CALLBACK_ACTIONS:
+                if tag_code == "quote" and action not in ON_CANCEL_BREAKUP_ACTIONS:
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)
