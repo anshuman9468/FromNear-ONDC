@@ -7,6 +7,7 @@ from pathlib import Path
 from app.core.settings import settings
 from app.ondc.bpp.client import bpp_client
 from app.ondc.bpp.order_builder import _now
+from app.ondc.protocol.item_identity import resolve_item_identity
 
 logger = logging.getLogger(__name__)
 
@@ -205,19 +206,26 @@ def _normalize_catalog_quantities(catalog: dict) -> dict:
                 item.get("@ondc/org/statutory_reqs_prepackaged_food")
             )
 
-            parent_id = item.get("parent_item_id")
-            if not isinstance(parent_id, str) or not parent_id.strip():
-                item["parent_item_id"] = "V1"
-
             # RET10 catalog and callback payloads use location_id. Accept the
             # legacy input alias but never emit it, otherwise Workbench builds
             # select/init/confirm requests with an invalid `location` field.
-            location_id = item.get("location_id") or item.get("location") or "L1"
-            item["location_id"] = str(location_id)
+            location_ids = [
+                str(location.get("id"))
+                for location in provider.get("locations", [])
+                if isinstance(location, dict) and location.get("id")
+            ]
+            fulfillment_ids = [
+                str(fulfillment.get("id"))
+                for fulfillment in provider.get("fulfillments", [])
+                if isinstance(fulfillment, dict) and fulfillment.get("id")
+            ]
+            identity = resolve_item_identity(
+                item,
+                default_location_id=location_ids[0] if len(location_ids) == 1 else None,
+                default_fulfillment_id=fulfillment_ids[0] if len(fulfillment_ids) == 1 else None,
+            )
+            item.update(identity)
             item.pop("location", None)
-
-            fulfillment_id = item.get("fulfillment_id") or "F1"
-            item["fulfillment_id"] = str(fulfillment_id)
 
             item["tags"] = [
                 tag for tag in item.get("tags", [])

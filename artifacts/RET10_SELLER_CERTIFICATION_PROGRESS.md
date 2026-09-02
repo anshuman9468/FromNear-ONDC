@@ -488,3 +488,56 @@ Certification status:
 
 Next iteration objective:
 - Deploy and verify the revision, then rerun the exact Workbench flow from a clean session. If the report still shows the same request-side failure without an application `/update` request, capture the Workbench mock payload as an external fixture issue.
+
+## Iteration 15: select identity retention
+
+Session ID: not created; source fix and local verification only
+Deployment revision: pending deployment of this commit
+Protocol version: `1.2.0`
+Header validation: Workbench-only setting; production signature verification unchanged
+
+Passed validations:
+- `63 passed` in the full application suite.
+- `40 passed` in the focused select/lifecycle suite.
+- Multi-item regression verifies distinct catalog locations and parent IDs are preserved for every selected item.
+- Lifecycle regression verifies an incomplete `on_select` callback cannot erase select item identity before `/init`.
+
+Failed validations:
+- No new Workbench report was generated in this iteration.
+
+Flows passed: local `/on_search`, `/select`, `/on_select`, `/init`, `/on_init`, `/confirm`, and callback guard coverage
+Flows failed: no local application test failures
+Flows newly reached: none remotely
+
+Fixed since prior run:
+- Added one canonical item identity resolver for buyer and seller serializers.
+- Preserved `location_id`, `parent_item_id`, and `fulfillment_id` from raw catalog records through search results and select enrichment.
+- Removed the request-side legacy `location` wire field.
+- Rejected incomplete item identity instead of using arbitrary `L1`/`V1` fallbacks.
+- Preserved selected item identity when `on_select` omits those fields.
+
+Persistent:
+- Fresh Workbench execution and final report are still required to prove the deployed result.
+
+Regressions: none in the full application suite.
+
+Root causes:
+1. Catalog identity was discarded by the search cache/result mapping before `/select` serialization.
+2. Callback persistence overwrote the selected request with a sparse callback body.
+
+Code changes:
+- `backend/app/ondc/protocol/item_identity.py`
+- `backend/app/ondc/protocol/builders.py`
+- `backend/app/ondc/services/search.py`
+- `backend/app/ondc/services/select.py`
+- `backend/app/ondc/services/init.py`
+- `backend/app/ondc/schemas/product.py`
+- `backend/app/ondc/mapper/search.py`
+- Seller callback catalog/order serializers and regression fixtures listed in the commit.
+
+Tests added/updated:
+- Multi-item canonical identity resolution and missing-identity rejection.
+- Select-to-init persistence of catalog references across a sparse `on_select` callback.
+
+Next iteration objective:
+- Commit, deploy using the existing Cloud Run service, verify the serving revision and health endpoint, then run a fresh Workbench Seller session and compare its report against this ledger.

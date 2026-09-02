@@ -1,3 +1,4 @@
+import copy
 import uuid
 import logging
 from typing import Dict, Any, List
@@ -7,8 +8,47 @@ from app.repositories.order import order_repo, order_item_repo
 from app.models.order import Order, OrderItem
 from app.ondc.protocol.builders import SelectRequestBuilder
 from app.ondc.protocol.parsers import SelectResponse
+from app.ondc.services.search import ondc_search_service
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_on_select_with_request(
+    callback_payload: Dict[str, Any],
+    request_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Keep canonical select references when an on_select omits them.
+
+    BPP callbacks may return only the fields needed to update the quote. The
+    subsequent /init request still needs the identifiers selected from the
+    catalog, so callback item fields are layered over the original request
+    item fields by item id. No identifier is synthesized here.
+    """
+    merged = copy.deepcopy(callback_payload)
+    callback_order = merged.setdefault("message", {}).setdefault("order", {})
+    request_order = (request_payload or {}).get("message", {}).get("order", {})
+    request_items = request_order.get("items", []) if isinstance(request_order, dict) else []
+    callback_items = callback_order.get("items", [])
+
+    request_by_id = {
+        item.get("id"): item
+        for item in request_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    if isinstance(callback_items, list) and callback_items:
+        preserved_items = []
+        for callback_item in callback_items:
+            if not isinstance(callback_item, dict):
+                continue
+            item_id = callback_item.get("id")
+            preserved = copy.deepcopy(request_by_id.get(item_id, {}))
+            preserved.update(copy.deepcopy(callback_item))
+            preserved_items.append(preserved)
+        callback_order["items"] = preserved_items
+    elif request_items:
+        callback_order["items"] = copy.deepcopy(request_items)
+
+    return merged
 
 
 class SelectService:
@@ -27,6 +67,13 @@ class SelectService:
         """Build and send a standard ONDC /select request to the BPP."""
         message_id = str(uuid.uuid4())
         
+        # Resolve references from the on_search catalog before serializing.
+        # This keeps the request independent of UI aliases and preserves the
+        # actual parent-child relationship for every selected item.
+        resolved_items = await ondc_search_service.enrich_items_for_selection(
+            db, transaction_id, provider_id, items
+        )
+
         # Build request body
         payload = SelectRequestBuilder.build(
             transaction_id=transaction_id,
@@ -34,7 +81,7 @@ class SelectService:
             bpp_id=bpp_id,
             bpp_uri=bpp_uri,
             provider_id=provider_id,
-            items=items
+            items=resolved_items
         )
         
         # Check if Order already exists, if not, create one
@@ -51,19 +98,23 @@ class SelectService:
                 currency="INR",
             )
             
-            # Initialize raw_response as an empty dict, actual response will populate via on_select
-            order.raw_response = {}
+            # Keep the canonical select request available until on_select and
+            # init complete the lifecycle state.
+            order.raw_response = payload
             db.add(order)
             await db.commit()
             await db.refresh(order)
             
             # Save items
-            for item in items:
+            for item in resolved_items:
+                quantity = item.get("quantity", 1)
+                if isinstance(quantity, dict):
+                    quantity = quantity.get("count") or quantity.get("selected", {}).get("count") or 1
                 order_item = OrderItem(
                     order_id=order.id,
                     item_id=item["id"],
                     item_name=item.get("name", "Unknown"),
-                    quantity=item.get("quantity", 1),
+                    quantity=int(quantity),
                     price=item.get("price", 0.0)
                 )
                 db.add(order_item)
@@ -94,8 +145,9 @@ class SelectService:
                 logger.warning(f"Order not found for transaction_id={transaction_id} on_select callback")
                 return
                 
-            # Always update raw_response so BPP context is preserved even if callback contains errors
-            order.raw_response = payload
+            # Preserve the original select item references while taking the
+            # callback context and quote data as the current response.
+            order.raw_response = _merge_on_select_with_request(payload, order.raw_response or {})
 
             if not parser.is_success:
                 logger.warning(f"on_select callback reports error: {parser.error}")

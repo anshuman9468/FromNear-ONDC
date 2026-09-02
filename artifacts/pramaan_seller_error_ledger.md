@@ -152,3 +152,14 @@ Local verification: full backend test suite `58 passed`. The current supplied re
 | Sparse BAP update orders could preserve `fulfillments: []`; the update builder also skipped its fallback for `update_target=fulfillment` | Update Settlement Trail / BAP `/update` request verification | 1 visible normalized failure (repeated across report runs) | 0 in local regression | Fixed in source; deployment and fresh Workbench confirmation pending | `UpdateService` and `UpdateRequestBuilder` | Always synthesize one normalized fulfillment (`F1`) when the source order has no fulfillments; use `Return` for fulfillment-targeted updates and preserve valid tags. |
 
 Verification: full backend suite `60 passed`; targeted update/protocol and BPP callback suite `32 passed`. This fixes the application-generated BAP update path. If the same failure appears in a Seller Workbench report before any `/update` request reaches this service, the malformed mock payload is Workbench-side and requires a fresh flow/input reset rather than another BPP response change.
+
+## Iteration 15: canonical select item identity
+
+| Root Cause | Flow/API | Old Count | New Count | Status | Code Owner | Fix |
+|---|---|---:|---:|---|---|---|
+| The search-result/cache path dropped catalog `location_id`, `parent_item_id`, and `fulfillment_id`; the shared request builder then received only `{id, location}` or `{id, quantity}` and could not serialize canonical RET10 item references | `/on_search` -> `/select` -> `/init`, all selected items | Repeated for item 0 and item 1 in supplied Workbench reports | 0 in local regression | Fixed in source; fresh Workbench confirmation pending | Search cache mapping, select service, shared item serializer | Carry canonical identity from the raw `on_search` catalog, enrich every selected item generically, serialize `location_id` only, and reject unknown/missing catalog identity instead of inventing a parent ID. |
+| `on_select` callback persistence replaced the original select request, erasing identity when the callback omitted item reference fields | `/on_select` -> `/init` | Newly exposed by strict resolver | 0 in local regression | Fixed in source; fresh Workbench confirmation pending | Select lifecycle state persistence | Merge callback item fields over the original selected items by item ID, preserving canonical references for subsequent lifecycle requests. |
+
+Local verification for this iteration: `63 passed` in `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. pytest app/tests -q`; focused select/lifecycle verification: `40 passed`.
+
+No Workbench report was generated in this code-only iteration, so a zero-error remote certification result is not claimed here. The final proof still requires a new Seller RET10 Grocery session against the deployed revision.

@@ -63,7 +63,11 @@ class SearchMapper:
                     provider_name=provider_name,
                     bpp_id=bpp_id,
                     bpp_uri=bpp_uri,
-                    transaction_id=transaction_id
+                    transaction_id=transaction_id,
+                    location_id=str(item.get("location_id") or item.get("location") or ""),
+                    parent_item_id=str(item.get("parent_item_id") or ""),
+                    fulfillment_id=str(item.get("fulfillment_id") or ""),
+                    tags=item.get("tags") if isinstance(item.get("tags"), list) else [],
                 )
                 products.append(product)
                 

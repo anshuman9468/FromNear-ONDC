@@ -28,8 +28,14 @@ class InitService:
         if not order:
             raise ValueError(f"Order not found for transaction_id={transaction_id}")
             
-        # Parse items from DB to build request payload
-        items = [{"id": item.item_id, "quantity": item.quantity} for item in order.items]
+        # Prefer the canonical items retained from select/on_select. The DB
+        # OrderItem table intentionally stores checkout data, not ONDC
+        # catalog identity fields.
+        stored_order = (order.raw_response or {}).get("message", {}).get("order", {})
+        stored_items = stored_order.get("items") if isinstance(stored_order, dict) else None
+        items = stored_items if isinstance(stored_items, list) and stored_items else [
+            {"id": item.item_id, "quantity": item.quantity} for item in order.items
+        ]
         
         # Save Address to DB for the user if it doesn't exist
         # Check if we should save the shipping address as user address

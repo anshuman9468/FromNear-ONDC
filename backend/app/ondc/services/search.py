@@ -85,7 +85,11 @@ class OndcSearchService:
                     "item_id": item.get("id"),
                     "item_name": item.get("descriptor", {}).get("name", "Unknown Item"),
                     "price": float(price_data.get("value", 0.0)),
-                    "currency": price_data.get("currency", "INR")
+                    "currency": price_data.get("currency", "INR"),
+                    "location_id": str(item.get("location_id") or item.get("location") or ""),
+                    "parent_item_id": str(item.get("parent_item_id") or ""),
+                    "fulfillment_id": str(item.get("fulfillment_id") or ""),
+                    "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
                 })
                 
         if flat_items:
@@ -110,9 +114,15 @@ class OndcSearchService:
             images = []
             description = ""
             
+            location_id = ""
+            parent_item_id = ""
+            fulfillment_id = ""
+            tags = []
+            raw_providers = []
             try:
                 # Safely extract images and description from raw response JSON
-                raw_providers = record.raw_response.get("message", {}).get("catalog", {}).get("bpp/providers", [])
+                raw_catalog = record.raw_response.get("message", {}).get("catalog", {})
+                raw_providers = raw_catalog.get("bpp/providers", []) or raw_catalog.get("providers", [])
                 for prov in raw_providers:
                     if prov.get("id") == record.provider_id:
                         for item in prov.get("items", []):
@@ -124,8 +134,26 @@ class OndcSearchService:
                                     images = [img if isinstance(img, str) else img.get("url", "") for img in raw_images]
                                 elif isinstance(raw_images, str):
                                     images = [raw_images]
+                                location_id = str(item.get("location_id") or item.get("location") or "")
+                                parent_item_id = str(item.get("parent_item_id") or "")
+                                fulfillment_id = str(item.get("fulfillment_id") or "")
+                                tags = item.get("tags") if isinstance(item.get("tags"), list) else []
             except Exception:
                 pass
+
+            # Keep identity available even when a descriptor has no images or
+            # the raw response uses an alternate catalog provider key.
+            if not location_id or not parent_item_id or not fulfillment_id:
+                for provider in raw_providers:
+                    if provider.get("id") != record.provider_id:
+                        continue
+                    for item in provider.get("items", []):
+                        if item.get("id") == record.item_id:
+                            location_id = location_id or str(item.get("location_id") or item.get("location") or "")
+                            parent_item_id = parent_item_id or str(item.get("parent_item_id") or "")
+                            fulfillment_id = fulfillment_id or str(item.get("fulfillment_id") or "")
+                            tags = tags or (item.get("tags") if isinstance(item.get("tags"), list) else [])
+                            break
                 
             product = ProductModel(
                 id=record.item_id or "",
@@ -138,11 +166,52 @@ class OndcSearchService:
                 provider_name=record.provider_name or "",
                 bpp_id=record.raw_response.get("context", {}).get("bpp_id", ""),
                 bpp_uri=record.raw_response.get("context", {}).get("bpp_uri", ""),
-                transaction_id=record.transaction_id
+                transaction_id=record.transaction_id,
+                location_id=location_id or "",
+                parent_item_id=parent_item_id or "",
+                fulfillment_id=fulfillment_id or "",
+                tags=tags,
             )
             products.append(product)
             
         return products
+
+    async def enrich_items_for_selection(
+        self,
+        db: AsyncSession,
+        transaction_id: str,
+        provider_id: str,
+        items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Attach canonical identity from the cached on_search catalog.
+
+        The UI may submit only an item id and quantity. The catalog response
+        for the same transaction is the authority for location, parent, and
+        fulfillment references used in the subsequent /select request.
+        """
+        records = await search_repo.get_by_transaction_id_async(db, transaction_id)
+        catalog_items: Dict[str, Dict[str, Any]] = {}
+        for record in records:
+            if record.provider_id != provider_id or not record.item_id:
+                continue
+            raw_catalog = (record.raw_response or {}).get("message", {}).get("catalog", {})
+            raw_providers = raw_catalog.get("bpp/providers", []) or raw_catalog.get("providers", [])
+            for provider in raw_providers:
+                if provider.get("id") != provider_id:
+                    continue
+                for catalog_item in provider.get("items", []):
+                    if catalog_item.get("id") == record.item_id:
+                        catalog_items[record.item_id] = catalog_item
+                        break
+
+        enriched = []
+        for item in items:
+            current = dict(item) if isinstance(item, dict) else {}
+            catalog_item = catalog_items.get(str(current.get("id")))
+            if catalog_item:
+                current["catalog_item"] = catalog_item
+            enriched.append(current)
+        return enriched
 
 
 ondc_search_service = OndcSearchService()

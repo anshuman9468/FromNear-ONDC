@@ -84,6 +84,10 @@ def test_search_mapper():
                         "items": [
                             {
                                 "id": "item-1",
+                                "location_id": "L1",
+                                "parent_item_id": "V1",
+                                "fulfillment_id": "F1",
+                                "tags": [],
                                 "descriptor": {
                                     "name": "Item One",
                                     "short_desc": "Short description of item one",
@@ -116,3 +120,7 @@ def test_search_mapper():
     assert product.bpp_id == "bpp-1"
     assert product.bpp_uri == "https://bpp-1.com/ondc"
     assert product.transaction_id == "test-tx-123"
+    assert product.location_id == "L1"
+    assert product.parent_item_id == "V1"
+    assert product.fulfillment_id == "F1"
+    assert product.tags == []

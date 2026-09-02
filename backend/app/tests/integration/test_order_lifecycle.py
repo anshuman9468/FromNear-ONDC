@@ -31,7 +31,15 @@ def test_complete_order_lifecycle(client: TestClient):
                     "bpp_uri": "https://bpp-1.com/ondc",
                     "provider_id": "provider-1",
                     "provider_name": "Merchant Store",
-                    "items": [{"id": "item-1", "name": "Item One", "price": 150.0, "quantity": 2}]
+                        "items": [{
+                            "id": "item-1",
+                            "name": "Item One",
+                            "price": 150.0,
+                            "quantity": 2,
+                            "location_id": "L1",
+                            "parent_item_id": "V1",
+                            "fulfillment_id": "F1",
+                        }]
                 }
             )
             assert response.status_code == 200
@@ -113,6 +121,15 @@ def test_complete_order_lifecycle(client: TestClient):
             )
             assert response.status_code == 200
             assert response.json()["status"] == "ACK"
+
+            # The callback fixture below intentionally omits catalog identity
+            # fields. They must still survive from select into the init wire
+            # payload rather than being erased by callback persistence.
+            sent_init_payload = mock_post.call_args.args[1]
+            sent_init_item = sent_init_payload["message"]["order"]["items"][0]
+            assert sent_init_item["location_id"] == "L1"
+            assert sent_init_item["parent_item_id"] == "V1"
+            assert sent_init_item["fulfillment_id"] == "F1"
             
         # Simulate /on_init callback from BPP
         on_init_payload = {

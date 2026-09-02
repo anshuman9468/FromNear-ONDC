@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 
@@ -14,3 +14,7 @@ class ProductModel(BaseModel):
     bpp_id: str
     bpp_uri: str
     transaction_id: str
+    location_id: str = ""
+    parent_item_id: str = ""
+    fulfillment_id: str = ""
+    tags: List[dict] = Field(default_factory=list)

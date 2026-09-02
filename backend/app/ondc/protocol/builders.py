@@ -3,6 +3,7 @@ import datetime
 from datetime import timezone
 from typing import Dict, Any, List, Optional
 from app.core.settings import settings
+from app.ondc.protocol.item_identity import resolve_item_identity
 
 
 def format_gps(gps_str: Optional[str]) -> str:
@@ -52,13 +53,16 @@ def _ret10_quote_tags(kind: str) -> List[Dict[str, Any]]:
 def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
     """Normalize the item shape reused by select, init, confirm, and update."""
     normalized = dict(item) if isinstance(item, dict) else {}
-    normalized["id"] = str(normalized.get("id") or "I1")
-    normalized["location_id"] = str(normalized.get("location_id") or normalized.get("location") or "L1")
+    catalog_item = normalized.pop("catalog_item", None)
+    identity = resolve_item_identity(
+        normalized,
+        catalog_item=catalog_item if isinstance(catalog_item, dict) else None,
+        default_fulfillment_id=fulfillment_id,
+    )
+    normalized.update(identity)
     # RET10 request items use location_id. Do not forward the legacy location
     # field because Workbench validates the canonical representation.
     normalized.pop("location", None)
-    normalized["fulfillment_id"] = str(normalized.get("fulfillment_id") or fulfillment_id)
-    normalized["parent_item_id"] = str(normalized.get("parent_item_id") or "V1")
     normalized["quantity"] = {"count": get_item_count(normalized.get("quantity"))}
     if not isinstance(normalized.get("tags"), list) or not normalized["tags"]:
         normalized["tags"] = [{"code": "type", "list": [{"code": "type", "value": "item"}]}]
@@ -359,9 +363,11 @@ class SelectRequestBuilder(BaseRequestBuilder):
         context = cls.generate_context("select", transaction_id, message_id, bpp_id, bpp_uri)
         
         # items format: [{"id": "item_id", "quantity": 1}]
-        ondc_items = []
-        for it in items:
-            ondc_items.append(_complete_bap_item(it))
+        ondc_items = [_complete_bap_item(it) for it in items]
+        provider_location_ids = []
+        for item in ondc_items:
+            if item["location_id"] not in provider_location_ids:
+                provider_location_ids.append(item["location_id"])
 
         return cls.validate_and_return({
             "context": context,
@@ -369,7 +375,7 @@ class SelectRequestBuilder(BaseRequestBuilder):
                 "order": {
                     "provider": {
                         "id": provider_id,
-                        "locations": [{"id": "L1"}]
+                        "locations": [{"id": location_id} for location_id in provider_location_ids]
                     },
                     "items": ondc_items,
                     "fulfillments": [

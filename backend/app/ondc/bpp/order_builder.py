@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from app.core.settings import settings
+from app.ondc.protocol.item_identity import resolve_item_identity
 
 logger = logging.getLogger(__name__)
 
@@ -230,8 +231,9 @@ def _build_quote_item_details(
 def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Build a fully enriched order.items[] entry from catalog + incoming data."""
     it = it if isinstance(it, dict) else {}
-    item_id = str(it.get("id") or "I1")
+    item_id = str(it.get("id") or "")
     catalog_item = catalog_map.get(item_id)
+    identity = resolve_item_identity(it, catalog_item=catalog_item)
     incoming_quantity = it.get("quantity") if isinstance(it.get("quantity"), dict) else {}
     selected_quantity = incoming_quantity.get("selected") if isinstance(incoming_quantity.get("selected"), dict) else {}
     qty = (
@@ -243,18 +245,7 @@ def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Di
     except (TypeError, ValueError):
         qty = 1
     item_obj: Dict[str, Any] = {
-        "id": item_id,
-        "fulfillment_id": str(it.get("fulfillment_id") or (catalog_item or {}).get("fulfillment_id") or "F1"),
-        "location_id": (
-            str(
-                it.get("location_id")
-                or it.get("location")
-                or (catalog_item or {}).get("location_id")
-                or "L1"
-            )
-        ),
-        # parent_item_id is MANDATORY in all BPP responses per RET10 schema
-        "parent_item_id": _resolve_parent_item_id(catalog_item, it.get("parent_item_id")),
+        **identity,
         "tags": _resolve_item_tags(catalog_item, it.get("tags")),
     }
     if action == "on_select":

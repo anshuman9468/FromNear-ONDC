@@ -29,8 +29,8 @@ def test_select_request_builder_normalizes_workbench_items():
         provider_id="provider-1",
         # This is the legacy shape emitted by the Workbench input form.
         items=[
-            {"id": "I1", "location": "L1", "quantity": 2},
-            {"id": "I2", "location": "L1", "quantity": {"count": 1}},
+            {"id": "I1", "location": "L1", "parent_item_id": "V1", "quantity": 2},
+            {"id": "I2", "location": "L1", "parent_item_id": "V1", "quantity": {"count": 1}},
         ],
     )
     assert payload["context"]["action"] == "select"
@@ -60,7 +60,7 @@ def test_init_request_builder():
         bpp_id="bpp-1",
         bpp_uri="https://bpp-1.com",
         provider_id="provider-1",
-        items=[{"id": "item-1", "quantity": 2}],
+        items=[{"id": "item-1", "location_id": "L1", "parent_item_id": "V1", "quantity": 2}],
         billing_address=billing,
         shipping_address=shipping,
     )
@@ -79,8 +79,8 @@ def test_confirm_request_builder():
         bpp_uri="https://bpp-1.com",
         provider_id="provider-1",
         items=[
-            {"id": "I1", "location": "L1", "quantity": 2},
-            {"id": "I2", "location": "L1", "quantity": 1},
+            {"id": "I1", "location": "L1", "parent_item_id": "V1", "quantity": 2},
+            {"id": "I2", "location": "L1", "parent_item_id": "V1", "quantity": 1},
         ],
         billing_address=billing,
         shipping_address=shipping,
@@ -154,7 +154,11 @@ def test_update_request_builder_never_emits_empty_fulfillments(update_target):
         bpp_uri="https://bpp-1.com",
         order_id="order-123",
         update_target=update_target,
-        order={"id": "order-123", "items": [{"id": "I1"}], "fulfillments": []},
+        order={
+            "id": "order-123",
+            "items": [{"id": "I1", "location_id": "L1", "parent_item_id": "V1"}],
+            "fulfillments": [],
+        },
     )
 
     fulfillments = payload["message"]["order"]["fulfillments"]
@@ -162,6 +166,58 @@ def test_update_request_builder_never_emits_empty_fulfillments(update_target):
     assert fulfillments[0]["id"] == "F1"
     assert fulfillments[0]["type"] in {"Delivery", "Return"}
     assert isinstance(fulfillments[0]["tags"], list)
+
+
+def test_select_request_builder_resolves_catalog_identity_for_every_item():
+    payload = SelectRequestBuilder.build(
+        transaction_id="tx-catalog",
+        message_id="msg-catalog",
+        bpp_id="bpp-1",
+        bpp_uri="https://bpp-1.com",
+        provider_id="provider-1",
+        items=[
+            {
+                "id": "I1",
+                "quantity": 2,
+                "catalog_item": {
+                    "id": "I1",
+                    "location_id": "L1",
+                    "parent_item_id": "V1",
+                    "fulfillment_id": "F1",
+                },
+            },
+            {
+                "id": "I2",
+                "quantity": {"count": 1},
+                "catalog_item": {
+                    "id": "I2",
+                    "location_id": "L2",
+                    "parent_item_id": "V2",
+                    "fulfillment_id": "F2",
+                },
+            },
+        ],
+    )
+
+    items = payload["message"]["order"]["items"]
+    assert [{key: item[key] for key in ("id", "location_id", "parent_item_id", "fulfillment_id")} for item in items] == [
+        {"id": "I1", "location_id": "L1", "parent_item_id": "V1", "fulfillment_id": "F1"},
+        {"id": "I2", "location_id": "L2", "parent_item_id": "V2", "fulfillment_id": "F2"},
+    ]
+    assert all("location" not in item and "catalog_item" not in item for item in items)
+    assert payload["message"]["order"]["provider"]["locations"] == [{"id": "L1"}, {"id": "L2"}]
+
+
+def test_select_request_builder_rejects_item_without_catalog_identity():
+    with pytest.raises(ValueError, match=r"canonical RET10 reference\(s\)"):
+        SelectRequestBuilder.build(
+            transaction_id="tx-missing-identity",
+            message_id="msg-missing-identity",
+            bpp_id="bpp-1",
+            bpp_uri="https://bpp-1.com",
+            provider_id="provider-1",
+            items=[{"id": "I1", "quantity": 1}],
+        )
 
 
 def test_select_response_parser():

@@ -64,7 +64,8 @@ def test_catalog_normalizer_supplies_bpp_descriptor_and_food_statutory_data():
                 {
                     "id": "P1",
                     "locations": [{"id": "L1"}],
-                    "items": [{"id": "I1", "descriptor": {"name": "Rice"}}],
+                    "fulfillments": [{"id": "F1", "type": "Delivery"}],
+                    "items": [{"id": "I1", "parent_item_id": "V1", "descriptor": {"name": "Rice"}}],
                 }
             ]
         }
@@ -88,7 +89,8 @@ def test_catalog_normalizer_preserves_offer_tags_for_workbench_select_inputs():
                 {
                     "id": "P1",
                     "locations": [{"id": "L1"}],
-                    "items": [{"id": "I1", "descriptor": {"name": "Rice"}}],
+                    "fulfillments": [{"id": "F1", "type": "Delivery"}],
+                    "items": [{"id": "I1", "parent_item_id": "V1", "descriptor": {"name": "Rice"}}],
                     "offers": [{"id": "O1", "descriptor": {"name": "Store offer"}}],
                 }
             ]
@@ -117,7 +119,8 @@ def test_catalog_normalizer_emits_ret10_item_reference_fields_not_legacy_locatio
                 {
                     "id": "P1",
                     "locations": [{"id": "L1"}],
-                    "items": [{"id": "I1", "location": "L1", "descriptor": {"name": "Rice"}}],
+                    "fulfillments": [{"id": "F1", "type": "Delivery"}],
+                    "items": [{"id": "I1", "location": "L1", "parent_item_id": "V1", "descriptor": {"name": "Rice"}}],
                 }
             ]
         }

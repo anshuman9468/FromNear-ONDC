@@ -72,6 +72,10 @@ def test_on_search_callback_and_results(client: TestClient):
                             "items": [
                                 {
                                     "id": "item-coffee-beans",
+                                    "location_id": "L1",
+                                    "parent_item_id": "V1",
+                                    "fulfillment_id": "F1",
+                                    "tags": [],
                                     "descriptor": {
                                         "name": "Organic Coffee Beans 500g",
                                         "short_desc": "Medium roast premium beans",
@@ -119,6 +123,10 @@ def test_on_search_callback_and_results(client: TestClient):
         assert product["provider_name"] == "Organic Merchant Store"
         assert product["bpp_id"] == "bpp-merchant-1"
         assert product["transaction_id"] == transaction_id
+        assert product["location_id"] == "L1"
+        assert product["parent_item_id"] == "V1"
+        assert product["fulfillment_id"] == "F1"
+        assert product["tags"] == []
 
 
 def test_on_search_callback_decodes_gzip_body(client: TestClient):
