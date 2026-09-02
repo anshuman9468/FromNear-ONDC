@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+import os
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 
@@ -152,6 +153,16 @@ async def process_incoming_bpp_request(request: Request, action: str, handler_fu
         f"Request URL: {request.url}\n"
         f"HTTP Method: {request.method}\n"
         f"Caller: Workbench/BAP\n"
+    )
+    logger.info(
+        "[BPP RUNTIME] action=%s transaction_id=%s message_id=%s service=%s revision=%s configuration=%s git_sha=%s",
+        action,
+        context.get("transaction_id"),
+        context.get("message_id"),
+        os.getenv("K_SERVICE", "local"),
+        os.getenv("K_REVISION", "local"),
+        os.getenv("K_CONFIGURATION", "local"),
+        os.getenv("BUILD_GIT_SHA", "unknown"),
     )
 
     # Return the ACK first so Workbench records the inbound request before

@@ -3,6 +3,7 @@ import logging
 import asyncio
 import httpx
 import uuid
+import os
 from datetime import datetime, timezone
 from app.ondc.crypto.utils import generate_auth_header
 from app.core.settings import settings
@@ -84,25 +85,21 @@ class BppNetworkClient:
             stored_order=order,
             order_state=order.get("state"),
         )
-        # Keep the wire contract authoritative even when a stored order was
-        # created by an older process. The active Workbench RET10 contract
-        # requires quote metadata tags on every nested breakup item.
-        for breakup in canonical.get("quote", {}).get("breakup", []):
-            if not isinstance(breakup, dict) or not isinstance(breakup.get("item"), dict):
-                continue
-            title_type = breakup.get("@ondc/org/title_type")
-            breakup["item"]["tags"] = [{
-                "code": "quote",
-                "list": [{
-                    "code": "type",
-                    "value": "fulfillment" if title_type == "delivery" else "item",
-                }],
-            }]
         # Lifecycle-specific fields are not part of the generic order builder.
         if isinstance(order.get("cancellation"), dict):
             canonical["cancellation"] = order["cancellation"]
         normalized["order"] = canonical
         return normalized
+
+    @staticmethod
+    def _runtime_identity() -> dict:
+        """Return non-secret deployment identity for egress diagnostics."""
+        return {
+            "service": os.getenv("K_SERVICE", "local"),
+            "revision": os.getenv("K_REVISION", "local"),
+            "configuration": os.getenv("K_CONFIGURATION", "local"),
+            "git_sha": os.getenv("BUILD_GIT_SHA", "unknown"),
+        }
 
     def _create_response_context(self, request_context: dict, action: str) -> dict:
         """Create context for a DIRECT callback (on_select, on_init, on_confirm, on_update).
@@ -277,6 +274,16 @@ class BppNetworkClient:
                 f"start_gps={[f.get('start', {}).get('location', {}).get('gps') for f in wire_fulfillments]} "
                 f"start_phones={[f.get('start', {}).get('contact', {}).get('phone') for f in wire_fulfillments]} "
                 f"end_phones={[f.get('end', {}).get('contact', {}).get('phone') for f in wire_fulfillments]}\n"
+            )
+        if action in {"on_cancel", "on_status", "on_update"}:
+            breakup_tags = [
+                entry.get("item", {}).get("tags")
+                for entry in payload["message"].get("order", {}).get("quote", {}).get("breakup", [])
+                if isinstance(entry, dict) and isinstance(entry.get("item"), dict)
+            ]
+            log_msg += (
+                f"Final wire item tags={json.dumps(breakup_tags, ensure_ascii=True, separators=(',', ':'))}\n"
+                f"Runtime={json.dumps(self._runtime_identity(), sort_keys=True)}\n"
             )
         
         logger.info(log_msg)

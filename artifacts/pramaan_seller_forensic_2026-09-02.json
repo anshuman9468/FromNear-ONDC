@@ -1,0 +1,67 @@
+{
+  "source": "fresh Workbench evidence supplied in task",
+  "protocol": {
+    "domain": "ONDC:RET10",
+    "role": "Seller NP / BPP",
+    "category": "Grocery",
+    "core_version": "1.2.0"
+  },
+  "observed_failures": [
+    {
+      "flow": "Buyer Side Order Cancellation",
+      "api": "on_cancel",
+      "path": "message.order.quote.breakup[*].item.tags[0].code",
+      "expected": ["type", "parent", "child", "origin", "veg_nonveg", "custom_group"],
+      "actual": "quote",
+      "root_cause": "client final-boundary canonicalizer unconditionally rewrote all breakup item tags"
+    },
+    {
+      "flow": "RTO And Part Cancellation",
+      "api": "on_cancel",
+      "path": "message.order.quote.breakup[*].item.tags[0].code",
+      "expected": ["type", "parent", "child", "origin", "veg_nonveg", "custom_group"],
+      "actual": "quote",
+      "root_cause": "same shared final-boundary rewrite as Buyer Side Order Cancellation"
+    },
+    {
+      "flow": "post-order lifecycle callbacks",
+      "api": "on_status/on_update/on_cancel",
+      "path": "context",
+      "expected": "complete originating BAP/BPP context",
+      "actual": "undefined fields in delayed callbacks",
+      "root_cause": "sparse callback context could replace persisted originating context"
+    }
+  ],
+  "source_trace": {
+    "on_cancel": [
+      "BppCancelService.process_cancel",
+      "build_canonical_order",
+      "BppNetworkClient.send_callback",
+      "BppNetworkClient._post",
+      "BppNetworkClient._canonicalize_message",
+      "json.dumps",
+      "httpx.AsyncClient.post"
+    ],
+    "post_order_unsolicited": [
+      "push_post_confirm_lifecycle or push_rto_post_update_statuses",
+      "lifecycle._send_lifecycle_callback",
+      "BppNetworkClient.send_unsolicited",
+      "BppNetworkClient._post",
+      "json.dumps",
+      "httpx.AsyncClient.post"
+    ]
+  },
+  "deployment_observation_before_fix": {
+    "service": "fromnear-ondc-backend",
+    "region": "us-central1",
+    "custom_domain": "ondc.fromnear.com",
+    "traffic": "100% to fromnear-ondc-backend-00374-wsm",
+    "domain_mapping": "Cloud Run managed domain mapping; DomainRoutable=True"
+  },
+  "wire_regression_scope": [
+    "on_cancel buyer cancellation",
+    "on_cancel RTO/partial cancellation",
+    "on_status delayed lifecycle",
+    "on_update delayed lifecycle"
+  ]
+}

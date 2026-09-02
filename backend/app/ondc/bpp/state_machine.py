@@ -145,7 +145,16 @@ class LifecycleTracker:
         self._refresh(transaction_id)
         session = self.get_or_create(transaction_id)
         session["stored_order"] = order
-        session["stored_context"] = context.copy()
+        # Delayed callbacks can arrive with a sparse context. Preserve the
+        # originating participant context instead of replacing it with that
+        # incomplete callback request.
+        stored_context = dict(session.get("stored_context") or {})
+        stored_context.update({
+            key: value
+            for key, value in (context or {}).items()
+            if value not in (None, "")
+        })
+        session["stored_context"] = stored_context
         session["created_at"] = created_at
         session["order_id"] = order_id
         self._persist_durable(transaction_id)
@@ -160,6 +169,26 @@ class LifecycleTracker:
         self.get_or_create(transaction_id)
         self._refresh(transaction_id)
         return self.get_or_create(transaction_id).get("stored_context")
+
+    def get_callback_context(
+        self,
+        transaction_id: str,
+        fallback_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Recover the originating BAP context for delayed callbacks.
+
+        The current request may contain only a transaction ID after the
+        originating /confirm has completed. Stored values fill only missing
+        data; current non-empty request fields remain authoritative for the
+        current callback correlation.
+        """
+        merged = dict(self.get_stored_context(transaction_id) or {})
+        merged.update({
+            key: value
+            for key, value in (fallback_context or {}).items()
+            if value not in (None, "")
+        })
+        return merged
 
     def get_created_at(self, transaction_id: str) -> Optional[str]:
         self.get_or_create(transaction_id)

@@ -1,10 +1,11 @@
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.ondc.bpp.client import BppNetworkClient
+from app.ondc.bpp.client import BppNetworkClient, bpp_client
 from app.ondc.bpp.order_builder import build_canonical_order, build_canonical_quote, validate_ret10_payload
 from app.ondc.bpp.services.search import (
     BppSearchService,
@@ -231,6 +232,164 @@ def test_network_guard_rewrites_breakup_tags_to_active_ret10_vocab():
         "code": "quote",
         "list": [{"code": "type", "value": "item"}],
     }]
+
+
+def test_final_wire_on_cancel_uses_post_order_item_tag_vocabulary_for_multiple_items(monkeypatch):
+    """Exercise the real callback builder through the final HTTP body boundary."""
+    network = BppNetworkClient()
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self):
+            return None
+
+    async def capture_post(url, *, content, headers):
+        captured["url"] = url
+        captured["content"] = content
+        captured["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(network.client, "post", capture_post)
+    asyncio.run(network._post(
+        CONTEXT,
+        "on_cancel",
+        {
+            "order": {
+                "id": "ORDER-WIRE-1",
+                "state": "Cancelled",
+                "items": [
+                    {"id": "I1", "quantity": {"count": 1}},
+                    {"id": "I2", "quantity": {"count": 1}},
+                ],
+                "fulfillments": [{
+                    "id": "F1",
+                    "type": "Delivery",
+                    "state": {"descriptor": {"code": "Cancelled"}},
+                }],
+                "cancellation": {"reason": {"id": "002"}},
+            }
+        },
+        unsolicited=False,
+    ))
+
+    payload = json.loads(captured["content"])
+    assert payload["context"]["action"] == "on_cancel"
+    assert payload["context"]["bap_id"] == CONTEXT["bap_id"]
+    assert payload["context"]["bpp_id"] == "ondc.fromnear.com"
+
+    breakup = payload["message"]["order"]["quote"]["breakup"]
+    product_lines = [entry for entry in breakup if entry["@ondc/org/title_type"] == "item"]
+    assert len(product_lines) == 2
+    for entry in product_lines:
+        assert entry["item"]["tags"] == [{
+            "code": "type",
+            "list": [{"code": "type", "value": "item"}],
+        }]
+    assert all(
+        tag.get("code") != "quote"
+        for entry in breakup
+        for tag in entry["item"].get("tags", [])
+    )
+
+
+def test_final_wire_post_order_callbacks_retain_originating_context(monkeypatch):
+    from app.ondc.bpp.lifecycle import _send_lifecycle_callback
+
+    captured = []
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def raise_for_status(self):
+            return None
+
+    async def capture_post(url, *, content, headers):
+        captured.append(json.loads(content))
+        return FakeResponse()
+
+    monkeypatch.setattr(bpp_client.client, "post", capture_post)
+    lifecycle_tracker.store_order(
+        CONTEXT["transaction_id"],
+        {},
+        CONTEXT,
+        CONTEXT["timestamp"],
+        "ORDER-WIRE-2",
+    )
+    for action in ("on_status", "on_update", "on_cancel"):
+        asyncio.run(_send_lifecycle_callback(
+            {"transaction_id": CONTEXT["transaction_id"]},
+            action,
+            {
+                "id": "ORDER-WIRE-2",
+                "state": "Cancelled" if action == "on_cancel" else "In-progress",
+                "items": [{"id": "I1", "quantity": {"count": 1}}],
+                "fulfillments": [{
+                    "id": "F1",
+                    "state": {"descriptor": {"code": "Cancelled" if action == "on_cancel" else "Packed"}},
+                }],
+            },
+            unsolicited=True,
+        ))
+
+    assert len(captured) == 3
+    for payload, action in zip(captured, ("on_status", "on_update", "on_cancel")):
+        assert payload["context"]["action"] == action
+        assert payload["context"]["core_version"] == "1.2.0"
+        assert payload["context"]["bap_id"] == CONTEXT["bap_id"]
+        assert payload["context"]["bap_uri"] == CONTEXT["bap_uri"]
+        assert payload["context"]["bpp_id"] == "ondc.fromnear.com"
+        assert payload["context"]["bpp_uri"] == "https://ondc.fromnear.com/api/v1/ondc"
+        assert payload["context"]["transaction_id"] == CONTEXT["transaction_id"]
+
+
+def test_lifecycle_tracker_merges_sparse_context_with_originating_context():
+    tracker = LifecycleTracker()
+    tracker.store_order("tx-context", {}, CONTEXT, CONTEXT["timestamp"], "ORDER-1")
+
+    recovered = tracker.get_callback_context("tx-context", {"transaction_id": "tx-context"})
+
+    for key in ("bap_id", "bap_uri", "bpp_id", "bpp_uri", "domain", "country", "city", "core_version"):
+        assert recovered[key] == CONTEXT[key]
+
+
+def test_post_order_breakup_tag_policy_is_action_specific():
+    for action in ("on_status", "on_update", "on_cancel"):
+        order = build_canonical_order(
+            action=action,
+            payload={
+                "context": CONTEXT,
+                "message": {
+                    "order": {
+                        "id": "ORDER-POLICY-1",
+                        "items": [
+                            {"id": "I1", "quantity": {"count": 1}},
+                            {"id": "I2", "quantity": {"count": 1}},
+                        ],
+                        "fulfillments": [{
+                            "id": "F1",
+                            "state": {"descriptor": {"code": "Packed"}},
+                        }],
+                    }
+                },
+            },
+            state_code="Packed",
+            order_id="ORDER-POLICY-1",
+        )
+        product_lines = [
+            entry for entry in order["quote"]["breakup"]
+            if entry["@ondc/org/title_type"] == "item"
+        ]
+        assert len(product_lines) == 2
+        assert all(line["item"]["tags"][0]["code"] == "type" for line in product_lines)
+        assert all(
+            tag.get("code") != "quote"
+            for line in order["quote"]["breakup"]
+            for tag in line["item"].get("tags", [])
+        )
 
 
 def test_canonical_order_is_complete_for_every_order_callback_action():

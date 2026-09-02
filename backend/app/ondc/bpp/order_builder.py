@@ -53,6 +53,32 @@ DEFAULT_QUOTE_ITEM_TAGS = [
     }
 ]
 
+POST_ORDER_CALLBACK_ACTIONS = {"on_status", "on_update", "on_cancel"}
+
+
+def _quote_breakup_item_tags(action: str, quote_type: str) -> List[Dict[str, Any]]:
+    """Return the tag vocabulary valid for this callback's breakup line.
+
+    RET10 uses different tag namespaces for product and fulfillment breakup
+    lines.  In particular, post-order callbacks must not reuse the
+    fulfillment ``quote`` tag on product lines.
+    """
+    if action in POST_ORDER_CALLBACK_ACTIONS:
+        if quote_type == "fulfillment":
+            return []
+        return [{
+            "code": "type",
+            "list": [{"code": "type", "value": "item"}],
+        }]
+
+    return [{
+        "code": "quote",
+        "list": [{
+            "code": "type",
+            "value": "fulfillment" if quote_type == "fulfillment" else "item",
+        }],
+    }]
+
 
 def _normalize_fulfillment_tags(
     value: Any,
@@ -184,6 +210,7 @@ def _build_quote_item_details(
     unit_price: float,
     quantity: int = 1,
     quote_type: str = "item",
+    action: str = "on_confirm",
 ) -> Dict[str, Any]:
     """Build a fully populated quote.breakup[].item object."""
     item_id = str(item_id or "F1")
@@ -219,13 +246,7 @@ def _build_quote_item_details(
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
     }
-    res["tags"] = [{
-        "code": "quote",
-        "list": [{
-            "code": "type",
-            "value": "fulfillment" if quote_type == "fulfillment" else "item",
-        }],
-    }]
+    res["tags"] = _quote_breakup_item_tags(action, quote_type)
     return res
 
 
@@ -256,7 +277,10 @@ def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Di
     return item_obj
 
 
-def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_canonical_quote(
+    items: List[Dict[str, Any]],
+    action: str = "on_confirm",
+) -> Dict[str, Any]:
     """Build the full ONDC-compliant quote from catalog data."""
     item_map = _get_catalog_item_map()
 
@@ -277,7 +301,9 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         price = float((catalog_item or {}).get("price", {}).get("value", 250.0))
         item_total = price * quantity
         total_value += item_total
-        item_details = _build_quote_item_details(item_id, catalog_item, price, int(quantity))
+        item_details = _build_quote_item_details(
+            item_id, catalog_item, price, int(quantity), action=action
+        )
 
         quote_breakup.append({
             "@ondc/org/item_id": item_id,
@@ -304,6 +330,7 @@ def build_canonical_quote(items: List[Dict[str, Any]]) -> Dict[str, Any]:
             delivery_charge,
             1,
             quote_type="fulfillment",
+            action=action,
         ),
     })
 
@@ -618,7 +645,7 @@ def build_canonical_order(
     if not raw_fulfillments and stored_order:
         raw_fulfillments = stored_order.get("fulfillments", [])
     fulfillments = build_canonical_fulfillments(raw_fulfillments, state_code, action)
-    quote = build_canonical_quote(raw_items)
+    quote = build_canonical_quote(raw_items, action=action)
     payment_source = incoming_order.get("payment") or (stored_order or {}).get("payment", {})
     payment = build_canonical_payment(payment_source, bap_id, quote["price"]["value"], action=action)
     tags = build_canonical_tags(include_bap_terms=(action == "on_confirm"))
@@ -852,15 +879,21 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if "tags" in item and not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item tags must be an array")
         elif isinstance(item.get("tags"), list):
-            allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
-            allowed_quote_type_values = {"fulfillment", "order", "item"}
+            if action in POST_ORDER_CALLBACK_ACTIONS:
+                allowed_quote_tag_codes = {
+                    "type", "parent", "child", "origin", "veg_nonveg", "custom_group"
+                }
+                allowed_quote_type_values = {"item", "customization"}
+            else:
+                allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
+                allowed_quote_type_values = {"fulfillment", "order", "item"}
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
                 if tag_code not in allowed_quote_tag_codes:
                     errors.append(
                         f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
                     )
-                if tag_code == "quote":
+                if tag_code == "quote" and action not in POST_ORDER_CALLBACK_ACTIONS:
                     for list_idx, list_item in enumerate(tag.get("list", [])):
                         if (
                             isinstance(list_item, dict)

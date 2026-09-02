@@ -202,6 +202,8 @@ async def _send_lifecycle_callback(
     order_obj: Dict[str, Any],
     unsolicited: bool,
 ) -> None:
+    transaction_id = context.get("transaction_id") or order_obj.get("transaction_id") or "default_tx"
+    callback_context = lifecycle_tracker.get_callback_context(transaction_id, context)
     # Rebuild at the last boundary so asynchronous callbacks cannot carry a
     # partially stored fulfillment after a lifecycle update or cancellation.
     lifecycle_cancellation = order_obj.get("cancellation")
@@ -215,7 +217,7 @@ async def _send_lifecycle_callback(
     )
     order_obj = build_canonical_order(
         action=action,
-        payload={"context": context, "message": {"order": order_obj}},
+        payload={"context": callback_context, "message": {"order": order_obj}},
         state_code=callback_state,
         order_id=order_obj.get("id"),
         created_at=order_obj.get("created_at"),
@@ -230,9 +232,9 @@ async def _send_lifecycle_callback(
         order_obj["cancellation"] = dict(lifecycle_cancellation)
     response_payload = {
         "context": (
-            bpp_client._create_unsolicited_context(context, action)
+            bpp_client._create_unsolicited_context(callback_context, action)
             if unsolicited
-            else bpp_client._create_response_context(context, action)
+            else bpp_client._create_response_context(callback_context, action)
         ),
         "message": {"order": order_obj},
     }
@@ -241,9 +243,9 @@ async def _send_lifecycle_callback(
         raise ValueError(f"RET10 Schema Error for {action}: {errors}")
 
     if unsolicited:
-        await bpp_client.send_unsolicited(context, action, {"order": order_obj})
+        await bpp_client.send_unsolicited(callback_context, action, {"order": order_obj})
     else:
-        await bpp_client.send_callback(context, action, {"order": order_obj})
+        await bpp_client.send_callback(callback_context, action, {"order": order_obj})
 
 
 async def push_post_confirm_lifecycle(

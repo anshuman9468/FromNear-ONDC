@@ -624,3 +624,40 @@ Deployment verification:
 
 Next iteration objective:
 - Run a fresh Seller Workbench session against revision `00372-vqj`, execute all applicable flows, generate the report, and classify any remaining remote failures before making further code changes.
+
+## Iteration 18
+
+Session ID: not supplied in the forensic report
+Deployment revision: `fromnear-ondc-backend-00374-wsm` observed before this fix
+Protocol version: `1.2.0`
+Header validation: OFF (Workbench-only setting)
+
+Passed validations:
+- Local final-wire callback tests: 26 focused tests passed twice consecutively.
+- Full backend suite: 68 tests passed twice consecutively.
+
+Failed validations:
+- Fresh evidence showed `on_cancel` product breakup tags arriving as outer `code: "quote"`.
+- Fresh evidence showed incomplete context on delayed post-order callbacks.
+
+Flows:
+- Buyer cancellation `on_cancel`: source fix applied; fresh Workbench rerun pending.
+- RTO/part cancellation `on_cancel`: source fix applied; fresh Workbench rerun pending.
+- Delayed `on_status`/`on_update`: source fix applied; fresh Workbench rerun pending.
+
+Fixed since prior run:
+- Removed the final-boundary tag overwrite and made quote breakup tags action-specific.
+- Merged persisted originating context and recovered it in the shared unsolicited callback sender.
+- Added non-secret runtime revision and final-tag logging at ingress/egress.
+
+Persistent:
+- No fresh report was available after this code change.
+
+New deeper validations:
+- None observed locally; the final-wire tests now cover the reported failure family.
+
+Regressions:
+- None observed in either consecutive full-suite run.
+
+Next iteration objective:
+- Commit/push, deploy with a build SHA, verify Cloud Run traffic and custom-domain mapping, then execute a fresh Workbench Seller RET10 report.
