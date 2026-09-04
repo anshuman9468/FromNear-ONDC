@@ -13,20 +13,18 @@ CALLBACK_ACTIONS = (
 
 
 def context(action: str, transaction_id: str | None = None, message_id: str | None = None,
-            bpp_id: str | None = None, bpp_uri: str | None = None) -> dict[str, Any]:
+            bpp_id: str | None = None, bpp_uri: str | None = None, city: str | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {
         "domain": settings.domain,
-        "country": settings.country,
-        "city": settings.city,
         "action": action,
-        "core_version": settings.core_version,
-        "version": settings.core_version,
+        "version": settings.version,
         "bap_id": settings.subscriber_id,
         "bap_uri": settings.subscriber_uri,
         "transaction_id": transaction_id or str(uuid4()),
         "message_id": message_id or str(uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "ttl": "PT30S",
+        "location": {"country": {"code": settings.country}, "city": {"code": city or settings.default_city}},
     }
     if bpp_id:
         result["bpp_id"] = bpp_id
@@ -35,12 +33,12 @@ def context(action: str, transaction_id: str | None = None, message_id: str | No
     return result
 
 
-def search_payload(*, start_gps: str, end_gps: str, vehicle_category: str = "AUTO_RICKSHAW",
+def search_payload(*, start_gps: str, end_gps: str, city: str | None = None,
                    transaction_id: str | None = None, message_id: str | None = None) -> dict[str, Any]:
     if not start_gps or not end_gps:
         raise ValueError("start_gps and end_gps are required")
     return {
-        "context": context("search", transaction_id, message_id),
+        "context": context("search", transaction_id, message_id, city=city),
         "message": {
             "intent": {
                 "fulfillment": {
@@ -48,16 +46,24 @@ def search_payload(*, start_gps: str, end_gps: str, vehicle_category: str = "AUT
                         {"type": "START", "location": {"gps": start_gps}},
                         {"type": "END", "location": {"gps": end_gps}},
                     ],
-                    "vehicle": {"category": vehicle_category},
                 },
-                "payment": {"type": "ON-ORDER", "status": "NOT-PAID", "collected_by": "BPP"},
+                "payment": {"collected_by": "BAP", "tags": [
+                    {"descriptor": {"code": "BUYER_FINDER_FEES"}, "display": False, "list": [
+                        {"descriptor": {"code": "BUYER_FINDER_FEES_PERCENTAGE"}, "value": settings.finder_fee_percentage}
+                    ]},
+                    {"descriptor": {"code": "SETTLEMENT_TERMS"}, "display": False, "list": [
+                        {"descriptor": {"code": "SETTLEMENT_WINDOW"}, "value": "PT1D"},
+                        {"descriptor": {"code": "SETTLEMENT_BASIS"}, "value": "DELIVERY"},
+                        {"descriptor": {"code": "STATIC_TERMS"}, "value": settings.static_terms_url},
+                    ]},
+                ]},
             }
         },
     }
 
 
 def action_payload(action: str, *, transaction_id: str, bpp_id: str, bpp_uri: str,
-                   message: dict[str, Any]) -> dict[str, Any]:
+                   message: dict[str, Any], city: str | None = None) -> dict[str, Any]:
     if action not in {"select", "init", "confirm", "status", "cancel", "track", "update", "support", "issue"}:
         raise ValueError(f"Unsupported TRV10 action: {action}")
-    return {"context": context(action, transaction_id, str(uuid4()), bpp_id, bpp_uri), "message": message}
+    return {"context": context(action, transaction_id, str(uuid4()), bpp_id, bpp_uri, city), "message": message}
