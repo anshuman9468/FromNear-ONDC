@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ondc_buyer_certification/core/constants/app_constants.dart';
 import 'package:ondc_buyer_certification/core/theme/theme_provider.dart';
+import 'package:ondc_buyer_certification/core/network/backend_api.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -12,13 +13,23 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final List<String> _mockLogs = [
-    'System started successfully.',
-    'FastAPI Backend health: OK',
-    'PostgreSQL Database status: Connected',
-    'No active ONDC transaction pipelines initialized.',
-    'Awaiting Pramaan certification suite instructions...',
-  ];
+  Map<String, dynamic>? _systemStatus;
+  String? _loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStatus();
+  }
+
+  Future<void> _loadStatus() async {
+    try {
+      final status = await BackendApi().getSystemStatus();
+      if (mounted) setState(() => _systemStatus = status);
+    } catch (_) {
+      if (mounted) setState(() => _loadError = 'Backend unavailable');
+    }
+  }
 
   static const Color emeraldColor = Color(0xFF10B981);
 
@@ -26,6 +37,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final currentThemeMode = ref.watch(themeModeProvider);
+    final database = _systemStatus?['database']?.toString() ?? 'Checking';
+    final serviceState = _systemStatus?['status']?.toString() ?? 'Checking';
+    final ondcConfigured = _systemStatus?['ondc']?['configured'] == true;
+    final logs = <String>[
+      'Backend status: $serviceState',
+      'PostgreSQL: $database',
+      'ONDC configuration: ${ondcConfigured ? 'Ready' : 'Incomplete'}',
+      ...(_loadError == null ? const <String>[] : <String>[_loadError!]),
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -42,8 +62,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             tooltip: 'Toggle Theme',
             onPressed: () {
-              ref.read(themeModeProvider.notifier).state =
-                  currentThemeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+              ref
+                  .read(themeModeProvider.notifier)
+                  .state = currentThemeMode == ThemeMode.dark
+                  ? ThemeMode.light
+                  : ThemeMode.dark;
             },
           ),
           IconButton(
@@ -88,11 +111,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Text(
                       'ONDC Buyer Certification',
                       style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
-                          ),
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                      ),
                     ),
                     const SizedBox(height: AppConstants.spaceS),
                     Text(
@@ -111,7 +134,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(AppConstants.radiusS),
+                        borderRadius: BorderRadius.circular(
+                          AppConstants.radiusS,
+                        ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -134,13 +159,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               const SizedBox(height: AppConstants.spaceL),
 
+              Card(
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.local_taxi_outlined),
+                  ),
+                  title: const Text(
+                    'Ride Hailing',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: const Text(
+                    'Book a cab, auto, or two-wheeler through ONDC',
+                  ),
+                  trailing: const Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 16,
+                  ),
+                  onTap: () => context.go('/ride-hailing'),
+                ),
+              ),
+              const SizedBox(height: AppConstants.spaceL),
+
               // Diagnostics Grid
               Text(
                 'System Status',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                    ),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                ),
               ),
               const SizedBox(height: AppConstants.spaceM),
               GridView.count(
@@ -154,21 +200,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   _buildStatusCard(
                     context,
                     title: 'FastAPI Service',
-                    value: 'Healthy',
+                    value: serviceState,
                     icon: Icons.cloud_done_outlined,
                     color: emeraldColor,
                   ),
                   _buildStatusCard(
                     context,
                     title: 'PostgreSQL DB',
-                    value: 'Connected',
+                    value: database,
                     icon: Icons.storage_outlined,
                     color: emeraldColor,
                   ),
                   _buildStatusCard(
                     context,
                     title: 'Pramaan Suite',
-                    value: 'Ready',
+                    value: ondcConfigured ? 'Ready' : 'Configure',
                     icon: Icons.check_circle_outline_rounded,
                     color: Colors.blue,
                   ),
@@ -188,9 +234,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         children: [
                           Text(
                             'Sandbox Event logs',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
                           ),
                           Row(
                             children: [
@@ -221,17 +266,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           color: Theme.of(context).brightness == Brightness.dark
                               ? const Color(0xFF0F172A)
                               : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(AppConstants.radiusM),
+                          borderRadius: BorderRadius.circular(
+                            AppConstants.radiusM,
+                          ),
                           border: Border.all(
-                            color: Theme.of(context).brightness == Brightness.dark
+                            color:
+                                Theme.of(context).brightness == Brightness.dark
                                 ? const Color(0xFF1E293B)
                                 : const Color(0xFFE2E8F0),
                           ),
                         ),
                         height: 180,
                         child: ListView.separated(
-                          itemCount: _mockLogs.length,
-                          separatorBuilder: (context, index) => const SizedBox(height: AppConstants.spaceS),
+                          itemCount: logs.length,
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: AppConstants.spaceS),
                           itemBuilder: (context, index) {
                             return Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,13 +289,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   '[${DateTime.now().toLocal().toString().substring(11, 19)}] ',
                                   style: TextStyle(
                                     fontFamily: 'monospace',
-                                    color: colors.primary.withValues(alpha: 0.7),
+                                    color: colors.primary.withValues(
+                                      alpha: 0.7,
+                                    ),
                                     fontSize: 13,
                                   ),
                                 ),
                                 Expanded(
                                   child: Text(
-                                    _mockLogs[index],
+                                    logs[index],
                                     style: const TextStyle(
                                       fontFamily: 'monospace',
                                       fontSize: 13,
@@ -302,16 +353,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   Text(
                     title,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     value,
                     style: theme.textTheme.titleMedium?.copyWith(
-                          color: color,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:ondc_buyer_certification/features/authentication/presentation/login_screen.dart';
 import 'package:ondc_buyer_certification/features/authentication/presentation/splash_screen.dart';
 import 'package:ondc_buyer_certification/features/home/presentation/home_screen.dart';
+import 'package:ondc_buyer_certification/features/ride_hailing/presentation/ride_hailing_screen.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
@@ -22,10 +23,12 @@ final GoRouter appRouter = GoRouter(
       name: 'home',
       builder: (context, state) => const HomeScreen(),
     ),
-  ],
-  errorBuilder: (context, state) => Scaffold(
-    body: Center(
-      child: Text('Route not found: ${state.uri}'),
+    GoRoute(
+      path: '/ride-hailing',
+      name: 'ride-hailing',
+      builder: (context, state) => const RideHailingScreen(),
     ),
-  ),
+  ],
+  errorBuilder: (context, state) =>
+      Scaffold(body: Center(child: Text('Route not found: ${state.uri}'))),
 );

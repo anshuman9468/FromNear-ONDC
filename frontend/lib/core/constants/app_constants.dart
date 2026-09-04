@@ -7,6 +7,7 @@ class AppConstants {
 
   // API Config
   static const String apiBaseUrl = 'http://localhost:8000/api/v1';
+  static const String rideHailingBaseUrl = 'https://ride.fromnear.com';
   static const Duration apiTimeout = Duration(seconds: 30);
 
   // Spacing & Padding
