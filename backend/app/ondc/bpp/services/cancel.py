@@ -23,14 +23,15 @@ class BppCancelService:
                 logger.info(f"Ignoring duplicate /cancel for tx {transaction_id}")
                 return
             lifecycle_tracker.cancel_lifecycle_task(transaction_id)
-            order_id = message.get("order_id", "2026-07-27-1001")
+            stored_order = lifecycle_tracker.get_stored_order(transaction_id)
+            order_id = message.get("order_id") or lifecycle_tracker.get_order_id(transaction_id) or "2026-07-27-1001"
             cancellation_reason_id = str(message.get("cancellation_reason_id") or "002")
             if cancellation_reason_id not in VALID_CANCELLATION_REASON_IDS:
                 cancellation_reason_id = "002"
 
             await asyncio.sleep(1)
 
-            created_at = _now()
+            created_at = lifecycle_tracker.get_created_at(transaction_id) or message.get("created_at") or _now()
             updated_at = _now()
 
             order_obj = build_canonical_order(
@@ -40,6 +41,7 @@ class BppCancelService:
                 order_id=order_id,
                 created_at=created_at,
                 updated_at=updated_at,
+                stored_order=stored_order,
             )
             order_obj["state"] = "Cancelled"
             order_obj["cancellation"] = {

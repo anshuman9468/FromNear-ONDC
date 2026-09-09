@@ -89,6 +89,19 @@ def _complete_bap_item(item: Dict[str, Any], fulfillment_id: str = "F1") -> Dict
     return normalized
 
 
+def _complete_bap_offers(offers: Any) -> List[Dict[str, Any]]:
+    """Ensure every offer has a tags array as required by RET10 schema."""
+    if not isinstance(offers, list):
+        return []
+    result = []
+    for offer in offers:
+        if isinstance(offer, dict):
+            off = dict(offer)
+            off["tags"] = off.get("tags") if isinstance(off.get("tags"), list) else []
+            result.append(off)
+    return result
+
+
 def _complete_bap_fulfillment(fulfillment: Dict[str, Any], fulfillment_id: str = "F1") -> Dict[str, Any]:
     """Fill stable contact and location defaults before an outbound BAP request."""
     normalized = dict(fulfillment) if isinstance(fulfillment, dict) else {}
@@ -379,6 +392,7 @@ class SelectRequestBuilder(BaseRequestBuilder):
         bpp_uri: str,
         provider_id: str,
         items: List[Dict[str, Any]],
+        offers: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         context = cls.generate_context("select", transaction_id, message_id, bpp_id, bpp_uri)
         
@@ -389,49 +403,66 @@ class SelectRequestBuilder(BaseRequestBuilder):
             if item["location_id"] not in provider_location_ids:
                 provider_location_ids.append(item["location_id"])
 
+        order_dict: Dict[str, Any] = {
+            "provider": {
+                "id": provider_id,
+                "locations": [{"id": location_id} for location_id in provider_location_ids]
+            },
+            "items": ondc_items,
+            "fulfillments": [
+                _complete_bap_fulfillment({
+                    # id is MANDATORY in select per RET10 schema
+                    "id": "F1",
+                    "type": "Delivery",
+                    # tracking must be consistent with on_select response
+                    "tracking": True,
+                    "end": {
+                        "contact": {
+                            "phone": "9876543210",
+                            "email": "buyer@example.com",
+                            "name": "Jane Doe"
+                        },
+                        "person": {
+                            "name": "Jane Doe"
+                        },
+                        "location": {
+                            "gps": format_gps("12.9716,77.5946"),
+                            "address": {
+                                "name": "Jane Doe",
+                                "building": "Apt 4B",
+                                "locality": "MG Road",
+                                "city": "Bengaluru",
+                                "state": "Karnataka",
+                                "country": "IND",
+                                "area_code": "560001"
+                            }
+                        }
+                    }
+                })
+            ]
+        }
+        if offers is None:
+            extracted_offers = []
+            for item in items:
+                if isinstance(item, dict):
+                    cat_item = item.get("catalog_item", {}) if isinstance(item.get("catalog_item"), dict) else {}
+                    item_offers = item.get("offers") or cat_item.get("offers")
+                    if isinstance(item_offers, list) and item_offers:
+                        extracted_offers.extend(item_offers)
+            if extracted_offers:
+                offers = extracted_offers
+
+        if offers is not None:
+            order_dict["offers"] = _complete_bap_offers(offers)
+
+
         return cls.validate_and_return({
             "context": context,
             "message": {
-                "order": {
-                    "provider": {
-                        "id": provider_id,
-                        "locations": [{"id": location_id} for location_id in provider_location_ids]
-                    },
-                    "items": ondc_items,
-                    "fulfillments": [
-                        _complete_bap_fulfillment({
-                            # id is MANDATORY in select per RET10 schema
-                            "id": "F1",
-                            "type": "Delivery",
-                            # tracking must be consistent with on_select response
-                            "tracking": True,
-                            "end": {
-                                "contact": {
-                                    "phone": "9876543210",
-                                    "email": "buyer@example.com",
-                                    "name": "Jane Doe"
-                                },
-                                "person": {
-                                    "name": "Jane Doe"
-                                },
-                                "location": {
-                                    "gps": format_gps("12.9716,77.5946"),
-                                    "address": {
-                                        "name": "Jane Doe",
-                                        "building": "Apt 4B",
-                                        "locality": "MG Road",
-                                        "city": "Bengaluru",
-                                        "state": "Karnataka",
-                                        "country": "IND",
-                                        "area_code": "560001"
-                                    }
-                                }
-                            }
-                        })
-                    ]
-                }
+                "order": order_dict
             },
         })
+
 
 
 class InitRequestBuilder(BaseRequestBuilder):
@@ -786,11 +817,14 @@ class UpdateRequestBuilder(BaseRequestBuilder):
             msg_order["id"] = order_id
         
         # Ensure items and fulfillments tags/parent_item_id are initialized
-        if "items" in msg_order and isinstance(msg_order["items"], list):
+        if "items" in msg_order and isinstance(msg_order["items"], list) and msg_order["items"]:
             new_items = []
             for it in msg_order["items"]:
                 new_items.append(_complete_bap_item(it))
             msg_order["items"] = new_items
+        if not isinstance(msg_order.get("items"), list) or not msg_order["items"]:
+            msg_order["items"] = [_complete_bap_item({"id": "I1", "quantity": 1})]
+
             
         if "fulfillments" in msg_order and isinstance(msg_order["fulfillments"], list):
             new_fulfillments = []

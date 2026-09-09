@@ -674,6 +674,16 @@ def build_canonical_order(
         "tags": tags,
     }
 
+    raw_offers = incoming_order.get("offers") or (stored_order or {}).get("offers")
+    if isinstance(raw_offers, list) and raw_offers:
+        normalized_offers = []
+        for offer in raw_offers:
+            if isinstance(offer, dict):
+                off = dict(offer)
+                off["tags"] = off.get("tags") if isinstance(off.get("tags"), list) else []
+                normalized_offers.append(off)
+        order_obj["offers"] = normalized_offers
+
     if action in ("on_init", "on_confirm", "on_status", "on_update", "on_cancel"):
         billing_source = incoming_order.get("billing") or (stored_order or {}).get("billing", {})
         order_obj["billing"] = build_canonical_billing(billing_source, ord_created_at, ord_updated_at)
@@ -916,4 +926,13 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
     if not payment.get("@ondc/org/settlement_basis"):
         errors.append("Payment missing @ondc/org/settlement_basis")
 
+    # 10. Offers validation
+    offers = order.get("offers")
+    if isinstance(offers, list):
+        for idx, off in enumerate(offers):
+            if isinstance(off, dict):
+                if not isinstance(off.get("tags"), list):
+                    errors.append(f"Offer[{idx}] missing tags array: message.order.offers[{idx}].tags")
+
     return errors
+

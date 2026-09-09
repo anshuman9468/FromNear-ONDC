@@ -31,9 +31,6 @@ class BppUpdateService:
             lifecycle_tracker.mark_rto_flow(transaction_id)
 
         if is_rto_flow(context, payload):
-            # RTO already emitted the required unsolicited on_update after
-            # confirm. The later mock /update advances the RTO state and must
-            # not produce a second, out-of-sequence on_update callback.
             order_obj = build_canonical_order(
                 action="on_update",
                 payload=payload,
@@ -44,7 +41,20 @@ class BppUpdateService:
                 stored_order=stored_order,
                 order_state="In-progress",
             )
+            response_message = {"order": order_obj}
+            response_payload = {
+                "context": bpp_client._create_response_context(context, "on_update"),
+                "message": response_message,
+            }
+            errors = validate_ret10_payload("on_update", response_payload)
+            if errors:
+                logger.error(f"RET10 Validation Failed for RTO on_update: {errors}")
+                raise ValueError(f"RET10 Schema Error: {errors}")
+
             lifecycle_tracker.store_order(transaction_id, order_obj, context, created_at, order_id)
+            await bpp_client.send_callback(context, "on_update", response_message)
+            lifecycle_tracker.record_callback(transaction_id, "on_update", "Return-Initiated")
+
             await push_rto_post_update_statuses(
                 context=context,
                 payload=payload,

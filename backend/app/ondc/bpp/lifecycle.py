@@ -180,20 +180,46 @@ def is_buyer_return_flow(
     return isinstance(bpp_terms, dict) and bpp_terms.get("list") == []
 
 
-def is_out_of_stock_flow(transaction_id: str | None = None) -> bool:
+def is_out_of_stock_flow(
+    transaction_id: str | None = None,
+    payload: Dict[str, Any] | None = None,
+) -> bool:
     mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
     if mode in {"out_of_stock", "oos"}:
         return True
-    flow_hint = str(transaction_id or "").lower()
-    return (
-        "out_of_stock" in flow_hint
-        or "out-of-stock" in flow_hint
-        or "oos" in flow_hint
-        or (
-            transaction_id is not None
-            and lifecycle_tracker.is_out_of_stock_flow(transaction_id)
+    
+    haystack = " ".join(
+        str(v).lower()
+        for v in (
+            transaction_id,
+            (payload or {}).get("context", {}).get("transaction_id"),
+            (payload or {}).get("context", {}).get("message_id"),
         )
+        if v
     )
+    if "out_of_stock" in haystack or "out-of-stock" in haystack or "oos" in haystack:
+        return True
+
+    if transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id):
+        return True
+
+    order = (payload or {}).get("message", {}).get("order", {})
+    if isinstance(order, dict):
+        items = order.get("items", [])
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict):
+                    qty = item.get("quantity", {})
+                    count = int(qty.get("selected", {}).get("count") or qty.get("count") or 1)
+                    if count == 0 or count > 5:
+                        return True
+                    tags = item.get("tags", [])
+                    if isinstance(tags, list):
+                        for tag in tags:
+                            if isinstance(tag, dict) and tag.get("code") in ("out_of_stock", "oos", "item_out_of_stock"):
+                                return True
+
+    return False
 
 
 async def _send_lifecycle_callback(

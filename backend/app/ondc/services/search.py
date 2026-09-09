@@ -199,9 +199,19 @@ class OndcSearchService:
             for provider in raw_providers:
                 if provider.get("id") != provider_id:
                     continue
+                prov_offers = provider.get("offers") if isinstance(provider.get("offers"), list) else []
                 for catalog_item in provider.get("items", []):
                     if catalog_item.get("id") == record.item_id:
-                        catalog_items[record.item_id] = catalog_item
+                        c_item = dict(catalog_item)
+                        if prov_offers:
+                            c_item["offers"] = [
+                                {
+                                    **(off if isinstance(off, dict) else {}),
+                                    "tags": (off.get("tags") if isinstance(off, dict) and isinstance(off.get("tags"), list) else []),
+                                }
+                                for off in prov_offers
+                            ]
+                        catalog_items[record.item_id] = c_item
                         break
 
         enriched = []
@@ -212,6 +222,7 @@ class OndcSearchService:
                 current["catalog_item"] = catalog_item
             enriched.append(current)
         return enriched
+
 
 
 ondc_search_service = OndcSearchService()

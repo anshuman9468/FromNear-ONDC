@@ -23,7 +23,7 @@ class BppSelectService:
         await asyncio.sleep(0.5)
 
         incoming_items = payload.get("message", {}).get("order", {}).get("items", [])
-        is_oos = is_out_of_stock_flow(transaction_id)
+        is_oos = is_out_of_stock_flow(transaction_id, payload)
         if not is_oos and incoming_items:
             from app.ondc.bpp.order_builder import _get_catalog_item_map
             catalog_map = _get_catalog_item_map()
