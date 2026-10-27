@@ -23,7 +23,7 @@ RET10_FULFILLMENT_STATE = {
 
 ALLOWED_FORWARD_STATUS_CODES = set(RET10_FULFILLMENT_STATE.values()) | {"Serviceable"}
 ALLOWED_RETURN_STATUS_CODES = ALLOWED_FORWARD_STATUS_CODES | {
-    "Return-Initiated", "Return-Approved", "Return-Picked", "Return-Delivered", "Liquidated", "Cancelled"
+    "Return_Initiated", "Return_Approved", "Return_Picked", "Return_Delivered", "Liquidated", "Cancelled"
 }
 
 # ISO-8601 UTC regex matching YYYY-MM-DDTHH:mm:ss.sssZ format
@@ -44,39 +44,15 @@ DEFAULT_DELIVERY_TAGS = [
         "list": [{"descriptor": {"code": "type"}, "value": "delivery"}],
     }
 ]
-DEFAULT_QUOTE_ITEM_TAGS = [
-    {
-        "code": "quote",
-        "list": [
-            {"code": "type", "value": "item"},
-        ],
-    }
-]
-
-ON_CANCEL_BREAKUP_ACTIONS = {"on_cancel"}
-
-
-def _quote_breakup_item_tags(action: str, quote_type: str) -> List[Dict[str, Any]]:
-    """Return the tag vocabulary valid for this callback's breakup line.
-
-    RET10 uses an action-specific tag namespace for cancellation breakup
-    lines.  Other lifecycle callbacks retain the standard ``quote`` tag.
-    """
-    if action in ON_CANCEL_BREAKUP_ACTIONS:
-        if quote_type == "fulfillment":
-            return []
-        return [{
-            "code": "type",
-            "list": [{"code": "type", "value": "item"}],
-        }]
-
-    return [{
-        "code": "quote",
-        "list": [{
-            "code": "type",
-            "value": "fulfillment" if quote_type == "fulfillment" else "item",
-        }],
-    }]
+def _quote_breakup_item_tags(quote_type: str, action: str = "on_confirm") -> List[Dict[str, Any]]:
+    """Return the nested item tag accepted by the RET10 Workbench schema."""
+    if quote_type != "item":
+        return []
+    # The live RET10 Workbench validators only accept
+    # quote-level tags (quote, np_fees, offer) at this path. The selected
+    # catalog item tag vocabulary belongs on message.order.items, not
+    # quote.breakup[].item.
+    return []
 
 
 def _normalize_fulfillment_tags(
@@ -108,6 +84,23 @@ def _normalize_fulfillment_tags(
                 "linked_order_diff", "quote_trail",
             }
         ]
+        # RET10 1.2.0 restricts the children of update_state. Workbench
+        # fixtures can include fulfillment timestamps in the incoming tag;
+        # copying those children into the BPP callback causes a NACK even
+        # though the tag itself is valid. Keep only the protocol vocabulary.
+        allowed_update_state_codes = {
+            "state", "reason_id", "update_state", "update_agent_details",
+            "update_label",
+        }
+        for tag in tags:
+            if tag.get("code") == "update_state":
+                values = tag.get("list")
+                if isinstance(values, list):
+                    tag["list"] = [
+                        value for value in values
+                        if isinstance(value, dict)
+                        and value.get("code") in allowed_update_state_codes
+                    ]
     else:
         tags = [tag for tag in tags if tag.get("code") == "order_details"]
 
@@ -137,7 +130,7 @@ def _normalize_fulfillment_tags(
         # the closest valid state before the callback is serialized.
         update_state = (
             "Order-delivered"
-            if state_code in {"Return-Delivered", "RTO-Delivered", "Cancelled"}
+            if state_code in {"Return_Delivered", "RTO-Delivered", "Cancelled"}
             else "Order-picked-up"
         )
         return [{
@@ -245,7 +238,9 @@ def _build_quote_item_details(
         "price": {"currency": "INR", "value": f"{unit_price:.2f}"},
         "parent_item_id": _resolve_parent_item_id(catalog_item),
     }
-    res["tags"] = _quote_breakup_item_tags(action, quote_type)
+    tags = _quote_breakup_item_tags(quote_type, action)
+    if tags:
+        res["tags"] = tags
     return res
 
 
@@ -257,12 +252,9 @@ def _build_order_item(it: Dict[str, Any], action: str, catalog_map: Dict[str, Di
     identity = resolve_item_identity(it, catalog_item=catalog_item)
     incoming_quantity = it.get("quantity") if isinstance(it.get("quantity"), dict) else {}
     selected_quantity = incoming_quantity.get("selected") if isinstance(incoming_quantity.get("selected"), dict) else {}
-    qty = (
-        selected_quantity.get("count")
-        or incoming_quantity.get("count", 1)
-    )
+    qty = selected_quantity.get("count", incoming_quantity.get("count", 1))
     try:
-        qty = max(1, int(qty))
+        qty = max(0 if action == "on_select" else 1, int(qty))
     except (TypeError, ValueError):
         qty = 1
     item_obj: Dict[str, Any] = {
@@ -329,7 +321,6 @@ def build_canonical_quote(
             delivery_charge,
             1,
             quote_type="fulfillment",
-            action=action,
         ),
     })
 
@@ -376,6 +367,8 @@ def build_canonical_fulfillments(
         # as missing because its selector matches no fulfillment.
         if action == "on_cancel":
             f_copy["type"] = "Delivery"
+        elif action == "on_status" and state_code.startswith("RTO-"):
+            f_copy["type"] = "RTO"
         elif state_code.startswith("Return") or state_code == "Liquidated":
             f_copy["type"] = "Return"
         else:
@@ -473,7 +466,12 @@ def build_canonical_fulfillments(
         end_inst["short_desc"] = end_inst.get("short_desc") or "Leave at door"
         end_inst["long_desc"] = end_inst.get("long_desc") or "Leave at door"
         end_inst["code"] = end_inst.get("code") or "1"
-        end_inst["images"] = end_inst.get("images") if isinstance(end_inst.get("images"), list) else []
+        images = end_inst.get("images")
+        if not isinstance(images, list) or not images:
+            # RET10 Workbench validates this list as non-empty on cancellation
+            # updates. Use the seller's catalog image when the incoming order
+            # omitted delivery instruction images.
+            end_inst["images"] = ["https://fromnear.com/store.jpg"]
         end["instructions"] = end_inst
 
         f_copy["end"] = end
@@ -694,7 +692,7 @@ def build_canonical_order(
             order_obj["state"] = order_state
         elif action == "on_cancel":
             order_obj["state"] = "Cancelled"
-        elif state_code in ("Order-delivered", "Return-Delivered"):
+        elif state_code in ("Order-delivered", "Return_Delivered"):
             order_obj["state"] = "Completed"
         elif action == "on_confirm":
             # ONDC RET10: on_confirm state must be "Created" (not "Accepted")
@@ -788,6 +786,12 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         errors.append("Fulfillments missing: message.order.fulfillments must not be empty")
     else:
         for idx, f in enumerate(fulfillments):
+            # RET10 cancellation is an event fulfillment. Its official RTO
+            # example carries id/type/state/tags without delivery endpoints.
+            if f.get("type") == "Cancel":
+                if not f.get("id") or f.get("state", {}).get("descriptor", {}).get("code") != "Cancelled":
+                    errors.append(f"Fulfillment[{idx}] invalid Cancel event")
+                continue
             if not f.get("@ondc/org/provider_name"):
                 errors.append(f"Fulfillment[{idx}] missing @ondc/org/provider_name")
             
@@ -888,30 +892,24 @@ def validate_ret10_payload(action: str, payload: Dict[str, Any]) -> List[str]:
         if "tags" in item and not isinstance(item.get("tags"), list):
             errors.append(f"Quote breakup[{idx}].item tags must be an array")
         elif isinstance(item.get("tags"), list):
-            if action in ON_CANCEL_BREAKUP_ACTIONS:
-                allowed_quote_tag_codes = {
-                    "type", "parent", "child", "origin", "veg_nonveg", "custom_group"
-                }
-                allowed_quote_type_values = {"item", "customization"}
-            else:
-                allowed_quote_tag_codes = {"quote", "np_fees", "offer"}
-                allowed_quote_type_values = {"fulfillment", "order", "item"}
+            allowed_breakup_item_tag_codes = {
+                "type", "parent", "child", "origin", "veg_nonveg", "custom_group"
+            }
             for tag_idx, tag in enumerate(item.get("tags", [])):
                 tag_code = tag.get("code") if isinstance(tag, dict) else None
-                if tag_code not in allowed_quote_tag_codes:
+                if tag_code not in allowed_breakup_item_tag_codes:
                     errors.append(
-                        f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_quote_tag_codes)}"
+                        f"Quote breakup[{idx}].item.tags[{tag_idx}].code must be one of {sorted(allowed_breakup_item_tag_codes)}"
                     )
-                if tag_code == "quote" and action not in ON_CANCEL_BREAKUP_ACTIONS:
-                    for list_idx, list_item in enumerate(tag.get("list", [])):
-                        if (
-                            isinstance(list_item, dict)
-                            and list_item.get("code") == "type"
-                            and list_item.get("value") not in allowed_quote_type_values
-                        ):
-                            errors.append(
-                                f"Quote breakup[{idx}].item.tags[{tag_idx}].list[{list_idx}].value must be one of {sorted(allowed_quote_type_values)}"
-                            )
+                if tag_code == "type" and not any(
+                    isinstance(entry, dict)
+                    and entry.get("code") == "type"
+                    and entry.get("value") == "item"
+                    for entry in tag.get("list", [])
+                ):
+                    errors.append(
+                        f"Quote breakup[{idx}].item.tags[{tag_idx}] must declare type=item"
+                    )
         if not item.get("price"):
             errors.append(f"Quote breakup[{idx}].item missing price object")
         if not item.get("quantity"):

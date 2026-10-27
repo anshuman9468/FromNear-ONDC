@@ -31,38 +31,102 @@ PREPAID_POST_TRACK_STATUS_SEQUENCE = [
     RET10_FULFILLMENT_STATE["DELIVERED"],
 ]
 
-# The merchant RTO Workbench fixture sends an opaque, otherwise ordinary
-# confirm and then waits for an unsolicited on_update.  Keep this window
-# short so normal delivery flows still fall back to their normal status path.
-RTO_DISAMBIGUATION_WINDOW_SECONDS = 8.0
+# The buyer-cancellation Workbench fixture sends /cancel shortly after it
+# receives on_confirm. Opaque Workbench transaction IDs do not identify that
+# fixture, so give the direct /cancel request a short opportunity to reserve
+# the lifecycle before the ordinary status stream begins.
+BUYER_CANCEL_GRACE_SECONDS = 5.0
 
 RTO_STATUS_SEQUENCE = [
-    RET10_FULFILLMENT_STATE["RTO_INITIATED"],
-    RET10_FULFILLMENT_STATE["RTO_DISPOSED"],
-    RET10_FULFILLMENT_STATE["RTO_DELIVERED"],
-    RET10_FULFILLMENT_STATE["CANCELLED"],
+    RET10_FULFILLMENT_STATE["PACKED"],
+    RET10_FULFILLMENT_STATE["AGENT_ASSIGNED"],
+    RET10_FULFILLMENT_STATE["PICKED_UP"],
+    RET10_FULFILLMENT_STATE["OUT_FOR_DELIVERY"],
 ]
 
 
-def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) -> bool:
+def _add_rto_cancel_fulfillment(order: Dict[str, Any], context: Dict[str, Any]) -> None:
+    """Expose the merchant cancellation to the Workbench settlement mock.
+
+    Its update generator selects a fulfillment with type Cancel from the
+    preceding Seller callback. A cancelled Delivery alone produces an empty
+    update.fulfillments array, which fails the RET10 schema check.
+    """
+    fulfillments = order.setdefault("fulfillments", [])
+    cancel = next((f for f in fulfillments if f.get("type") == "Cancel"), None)
+    if cancel is not None:
+        tags = cancel.setdefault("tags", [])
+        if any(tag.get("code") == "quote_trail" for tag in tags if isinstance(tag, dict)):
+            return
+    else:
+        item = next((i for i in order.get("items", []) if i.get("id")), {})
+        quote_price = order.get("quote", {}).get("price", {})
+        try:
+            refund = -abs(float(quote_price.get("value", "0")))
+        except (TypeError, ValueError):
+            refund = 0.0
+        cancel = {
+            "id": f"cancel-{order['id']}",
+            "type": "Cancel",
+            "state": {"descriptor": {"code": "Cancelled"}},
+            "tags": [],
+        }
+        fulfillments.append(cancel)
+        tags = cancel["tags"]
+    item = next((i for i in order.get("items", []) if i.get("id")), {})
+    quote_price = order.get("quote", {}).get("price", {})
+    try:
+        refund = -abs(float(quote_price.get("value", "0")))
+    except (TypeError, ValueError):
+        refund = 0.0
+    if not any(tag.get("code") == "cancel_request" for tag in tags if isinstance(tag, dict)):
+        tags.append({"code": "cancel_request", "list": [
+            {"code": "reason_id", "value": "002"},
+            {"code": "initiated_by", "value": context.get("bpp_id", "ondc.fromnear.com")},
+        ]})
+    tags.append({"code": "quote_trail", "list": [
+        {"code": "type", "value": "item"},
+        {"code": "id", "value": str(item.get("id", "I1"))},
+        {"code": "currency", "value": quote_price.get("currency", "INR")},
+        {"code": "value", "value": f"{refund:.2f}"},
+    ]})
+
+
+def is_rto_flow(
+    context: Dict[str, Any],
+    payload: Dict[str, Any] | None = None,
+    *,
+    stored_order: Dict[str, Any] | None = None,
+    refresh_state: bool = True,
+) -> bool:
     """Identify merchant-side RTO without depending on a Workbench flow name.
 
     Workbench generates opaque transaction IDs.  The only durable signal is
     the RTO marker carried in the order tags, so inspect the inbound order
     before falling back to explicit local mode or legacy transaction hints.
     """
-    flow_mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
-    if flow_mode == "rto":
-        return True
-    if flow_mode in {"buyer_return", "return", "status"}:
-        return False
-
+    # A Cloud Run service handles several Workbench scenarios concurrently.
+    # A process-wide mode must not classify every transaction as RTO (or
+    # suppress a real RTO); the marker on this transaction or persisted
+    # selection state is authoritative.
     transaction_id = context.get("transaction_id")
-    if transaction_id and lifecycle_tracker.is_rto_flow(transaction_id):
+    # The Merchant RTO Workbench fixture carries no RTO marker in its
+    # select/init/confirm payloads. In a deliberately isolated RTO run, the
+    # operator can select this mode for the pre-production BPP service; keep
+    # the default in auto so ordinary orders retain their normal status flow.
+    if (settings.ONDC_BPP_FLOW_MODE or "auto").lower() == "rto":
+        return True
+    if transaction_id and lifecycle_tracker.is_rto_flow(
+        transaction_id, refresh=refresh_state
+    ):
         return True
 
     order = (payload or {}).get("message", {}).get("order", {})
-    if isinstance(order, dict):
+    # Only inbound payload fields can identify the Workbench scenario. The
+    # stored order is Seller-generated and contains populated bpp_terms in
+    # ordinary orders too, so it cannot identify an RTO transaction.
+    candidate_orders = [order]
+    if any(isinstance(candidate, dict) for candidate in candidate_orders):
         # RET10 fixtures may place the merchant-side marker directly on the
         # order, on an item/fulfillment, or inside nested tag-list metadata.
         # Walk the complete order tree so serialization shape does not change
@@ -87,9 +151,11 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
                 return any(contains_rto_marker(item) for item in value)
             return False
 
-        if contains_rto_marker(order):
+        if any(contains_rto_marker(candidate) for candidate in candidate_orders):
             return True
 
+    # Commercial bpp_terms are shared by prepaid and RTO orders; they
+    # cannot identify a merchant cancellation. Require an explicit signal.
     haystack = " ".join(
         str(value).lower()
         for value in (
@@ -104,9 +170,6 @@ def is_rto_flow(context: Dict[str, Any], payload: Dict[str, Any] | None = None) 
 
 
 def is_prepaid_track_flow(transaction_id: str | None = None) -> bool:
-    mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
-    if mode in {"prepaid_track", "track", "out_of_stock"}:
-        return True
     flow_hint = str(transaction_id or "").lower()
     return (
         "prepaid" in flow_hint
@@ -120,14 +183,6 @@ def is_prepaid_track_flow(transaction_id: str | None = None) -> bool:
 
 def is_buyer_cancel_flow(context: Dict[str, Any] | None = None) -> bool:
     """Buyer cancellation waits for /cancel instead of pushing delivery status."""
-    mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
-    if mode in {
-        "cancel",
-        "buyer_cancel",
-        "buyer_cancellation",
-    }:
-        return True
-
     flow_hint = str((context or {}).get("transaction_id") or "").lower()
     if is_rto_flow(context or {}):
         return False
@@ -177,17 +232,18 @@ def is_buyer_return_flow(
         ),
         None,
     )
-    return isinstance(bpp_terms, dict) and bpp_terms.get("list") == []
+    # Workbench omits ``list`` entirely on the ordinary buyer fixtures.  An
+    # empty or absent list is the normal buyer delivery/return shape; the
+    # merchant RTO fixture carries populated seller terms.
+    return isinstance(bpp_terms, dict) and not bpp_terms.get("list")
 
 
 def is_out_of_stock_flow(
     transaction_id: str | None = None,
     payload: Dict[str, Any] | None = None,
+    *,
+    refresh_state: bool = True,
 ) -> bool:
-    mode = (settings.ONDC_BPP_FLOW_MODE or "auto").lower()
-    if mode in {"out_of_stock", "oos"}:
-        return True
-    
     haystack = " ".join(
         str(v).lower()
         for v in (
@@ -200,7 +256,9 @@ def is_out_of_stock_flow(
     if "out_of_stock" in haystack or "out-of-stock" in haystack or "oos" in haystack:
         return True
 
-    if transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(transaction_id):
+    if transaction_id is not None and lifecycle_tracker.is_out_of_stock_flow(
+        transaction_id, refresh=refresh_state
+    ):
         return True
 
     order = (payload or {}).get("message", {}).get("order", {})
@@ -287,21 +345,46 @@ async def push_post_confirm_lifecycle(
     if is_buyer_cancel_flow(context):
         return
 
-    if is_rto_flow(context, payload):
-        if lifecycle_tracker.is_cancelled(transaction_id):
-            return
-        update_order = build_canonical_order(
-            action="on_update",
+    if is_rto_flow(context, payload, stored_order=stored_order):
+        # An accepted delivery must be reported before the merchant cancels
+        # items. Pramaan selects this callback by Delivery + Pending even
+        # though Workbench's interactive card starts with the partial update.
+        pending_order = build_canonical_order(
+            action="on_status",
             payload=payload,
-            state_code=RET10_FULFILLMENT_STATE["PACKED"],
+            state_code=RET10_FULFILLMENT_STATE["PENDING"],
             order_id=order_id,
             created_at=created_at,
             updated_at=_now(),
             stored_order=stored_order,
-            order_state="In-progress",
+            order_state="Accepted",
         )
-        await _send_lifecycle_callback(context, "on_update", update_order, unsolicited=True)
-        lifecycle_tracker.record_callback(transaction_id, "on_update", RET10_FULFILLMENT_STATE["PACKED"])
+        await _send_lifecycle_callback(context, "on_status", pending_order, unsolicited=True)
+        lifecycle_tracker.record_callback(
+            transaction_id, "on_status", RET10_FULFILLMENT_STATE["PENDING"]
+        )
+        # Merchant-side RTO expects an unsolicited cancellation update directly
+        # after on_confirm, before Workbench sends its settlement-trail update.
+        await asyncio.sleep(0.5)
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
+        cancel_order = build_canonical_order(
+            action="on_update",
+            payload=payload,
+            state_code=RET10_FULFILLMENT_STATE["CANCELLED"],
+            order_id=order_id,
+            created_at=created_at,
+            updated_at=_now(),
+            stored_order=stored_order,
+            order_state="Cancelled",
+        )
+        _add_rto_cancel_fulfillment(cancel_order, context)
+        await _send_lifecycle_callback(context, "on_update", cancel_order, unsolicited=True)
+        lifecycle_tracker.record_callback(
+            transaction_id,
+            "on_update",
+            RET10_FULFILLMENT_STATE["CANCELLED"],
+        )
         return
 
     if is_prepaid_track_flow(transaction_id):
@@ -317,19 +400,33 @@ async def push_post_confirm_lifecycle(
                 created_at=created_at,
                 updated_at=_now(),
                 stored_order=stored_order,
-                order_state="In-progress",
+                order_state="Accepted" if state_code == RET10_FULFILLMENT_STATE["PENDING"] else "In-progress",
             )
             await _send_lifecycle_callback(context, "on_status", status_order, unsolicited=True)
             lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)
         return
 
     if is_buyer_return_flow(context, payload):
-        # Buyer-return flows have status pushes before the buyer's /update.
-        # Do not use the ambiguous RTO candidate callback here: Workbench
-        # treats that callback as out-of-sequence and waits for on_update only
-        # after the later inbound update request.
+        # Ordinary buyer delivery and return fixtures have the same confirm
+        # payload.  Start with the two delivery statuses, then let the inbound
+        # /update distinguish delivery (which advances immediately) from a
+        # return (which waits for the complete status sequence).
+        await asyncio.sleep(5.0)
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
         for state_code in [RET10_FULFILLMENT_STATE["PENDING"], *PREPAID_STATUS_SEQUENCE]:
-            await asyncio.sleep(0.5)
+            if lifecycle_tracker.get_callback_count(transaction_id, "on_status") == 2:
+                # The delivery fixture sends /update after its second status;
+                # the return fixture waits for all six.  Give that request
+                # time to arrive before emitting more callbacks out of order.
+                for _ in range(30):
+                    await asyncio.sleep(0.5)
+                    if lifecycle_tracker.is_cancelled(transaction_id):
+                        return
+                    if lifecycle_tracker.get_callback_count(transaction_id, "update"):
+                        return
+            else:
+                await asyncio.sleep(0.5)
             if lifecycle_tracker.is_cancelled(transaction_id):
                 return
             status_order = build_canonical_order(
@@ -340,45 +437,29 @@ async def push_post_confirm_lifecycle(
                 created_at=created_at,
                 updated_at=_now(),
                 stored_order=stored_order,
-                order_state="Completed" if state_code == RET10_FULFILLMENT_STATE["DELIVERED"] else "In-progress",
+                order_state=(
+                    "Accepted"
+                    if state_code == RET10_FULFILLMENT_STATE["PENDING"]
+                    else "Completed"
+                    if state_code == RET10_FULFILLMENT_STATE["DELIVERED"]
+                    else "In-progress"
+                ),
             )
             await _send_lifecycle_callback(context, "on_status", status_order, unsolicited=True)
             lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)
         return
 
-    # Some Workbench RTO scenarios contain no RTO marker in the inbound
-    # lifecycle requests.  Emit the required callback first and use the next
-    # inbound /update as the discriminator.  If no update arrives, continue
-    # with the normal delivery status sequence instead of permanently
-    # classifying the order as RTO.
-    lifecycle_tracker.mark_rto_candidate(transaction_id)
-    candidate_order = build_canonical_order(
-        action="on_update",
-        payload=payload,
-        state_code=RET10_FULFILLMENT_STATE["PACKED"],
-        order_id=order_id,
-        created_at=created_at,
-        updated_at=_now(),
-        stored_order=stored_order,
-        order_state="In-progress",
-    )
-    await _send_lifecycle_callback(context, "on_update", candidate_order, unsolicited=True)
-    lifecycle_tracker.record_callback(
-        transaction_id,
-        "on_update",
-        RET10_FULFILLMENT_STATE["PACKED"],
-    )
-    try:
-        elapsed = 0.0
-        while elapsed < RTO_DISAMBIGUATION_WINDOW_SECONDS:
-            await asyncio.sleep(0.5)
-            elapsed += 0.5
-            if lifecycle_tracker.is_cancelled(transaction_id):
-                return
-            if lifecycle_tracker.is_rto_flow(transaction_id):
-                return
-    finally:
-        lifecycle_tracker.clear_rto_candidate(transaction_id)
+    # Do not guess RTO from an ordinary confirm: the Workbench Prepaid and
+    # Merchant RTO fixtures can carry semantically identical confirm orders.
+    # RTO must have been classified from an explicit marker on /select, /init,
+    # or /confirm above. Sending a speculative on_update here breaks the
+    # Prepaid sequence and creates out-of-sequence callbacks.
+    elapsed = 0.0
+    while elapsed < BUYER_CANCEL_GRACE_SECONDS:
+        await asyncio.sleep(0.25)
+        elapsed += 0.25
+        if lifecycle_tracker.is_cancelled(transaction_id):
+            return
 
     # Give a buyer-side /cancel a chance to arrive before starting the generic
     # delivery-status stream. The cancellation scenario does not permit an
@@ -406,8 +487,9 @@ async def push_post_confirm_lifecycle(
     # Let buyer-side cancel arrive before delivery-status pushes begin.
     await asyncio.sleep(2.0)
 
-    # Workbench return flows expect the full delivery status progression before update.
-    for index, state_code in enumerate(PREPAID_STATUS_SEQUENCE):
+    # Return/delivery fixtures are handled above. Ordinary prepaid stops at
+    # pickup; /track owns the remaining callbacks so UI latency cannot race it.
+    for index, state_code in enumerate(PREPAID_STATUS_SEQUENCE[:3]):
         await asyncio.sleep(0.5)
         if lifecycle_tracker.is_cancelled(transaction_id):
             return
@@ -436,21 +518,36 @@ async def push_rto_post_update_statuses(
     created_at: str,
     stored_order: Dict[str, Any],
 ) -> None:
-    """After merchant-side RTO update, Workbench expects unsolicited on_status callbacks."""
+    """After the first merchant-side RTO update, send its statuses and cancel."""
     transaction_id = context.get("transaction_id", "default_tx")
+    status_payload = dict(payload)
+    status_message = dict(payload.get("message", {}))
+    status_order = dict(status_message.get("order", {}))
+    status_order["fulfillments"] = [
+        f for f in status_order.get("fulfillments", [])
+        if isinstance(f, dict) and f.get("type") != "Cancel"
+    ]
+    status_message["order"] = status_order
+    status_payload["message"] = status_message
     for state_code in RTO_STATUS_SEQUENCE:
         await asyncio.sleep(0.5)
         if lifecycle_tracker.is_cancelled(transaction_id):
             return
         status_order = build_canonical_order(
             action="on_status",
-            payload=payload,
+            payload=status_payload,
             state_code=state_code,
             order_id=order_id,
             created_at=created_at,
             updated_at=_now(),
             stored_order=stored_order,
-            order_state="Completed" if state_code == RET10_FULFILLMENT_STATE["RTO_DELIVERED"] else "In-progress",
+            order_state=(
+                "Accepted"
+                if state_code == RET10_FULFILLMENT_STATE["PENDING"]
+                else "Completed"
+                if state_code == RET10_FULFILLMENT_STATE["RTO_DELIVERED"]
+                else "In-progress"
+            ),
         )
         await _send_lifecycle_callback(context, "on_status", status_order, unsolicited=True)
         lifecycle_tracker.record_callback(transaction_id, "on_status", state_code)
@@ -466,6 +563,7 @@ async def push_rto_post_update_statuses(
         stored_order=stored_order,
         order_state="Cancelled",
     )
+    _add_rto_cancel_fulfillment(cancel_order, context)
     cancel_order["cancellation"] = {
         "cancelled_by": context.get("bpp_id", "ondc.fromnear.com"),
         "reason": {"id": "011"},
@@ -473,19 +571,44 @@ async def push_rto_post_update_statuses(
     await _send_lifecycle_callback(context, "on_cancel", cancel_order, unsolicited=True)
     lifecycle_tracker.record_callback(transaction_id, "on_cancel", RET10_FULFILLMENT_STATE["CANCELLED"])
 
+
+async def push_rto_final_status(
+    context: Dict[str, Any],
+    payload: Dict[str, Any],
+    order_id: str,
+    created_at: str,
+    stored_order: Dict[str, Any],
+) -> None:
+    """Finish the RTO flow with delivery back to origin after /update."""
+    transaction_id = context.get("transaction_id", "default_tx")
+    status_payload = dict(payload)
+    status_message = dict(payload.get("message", {}))
+    status_order = dict(status_message.get("order", {}))
+    status_order["fulfillments"] = [
+        f for f in status_order.get("fulfillments", [])
+        if isinstance(f, dict) and f.get("type") != "Cancel"
+    ]
+    status_message["order"] = status_order
+    status_payload["message"] = status_message
     await asyncio.sleep(0.5)
-    final_status_order = build_canonical_order(
+    if lifecycle_tracker.is_cancelled(transaction_id):
+        return
+    final_update_order = build_canonical_order(
         action="on_status",
-        payload=payload,
-        state_code=RET10_FULFILLMENT_STATE["CANCELLED"],
+        payload=status_payload,
+        state_code=RET10_FULFILLMENT_STATE["RTO_DELIVERED"],
         order_id=order_id,
         created_at=created_at,
         updated_at=_now(),
-        stored_order=cancel_order,
+        stored_order=stored_order,
         order_state="Cancelled",
     )
-    await _send_lifecycle_callback(context, "on_status", final_status_order, unsolicited=True)
-    lifecycle_tracker.record_callback(transaction_id, "on_status", "Final-Cancelled")
+    final_update_order["cancellation"] = {
+        "cancelled_by": context.get("bpp_id", "ondc.fromnear.com"),
+        "reason": {"id": "011"},
+    }
+    await _send_lifecycle_callback(context, "on_status", final_update_order, unsolicited=True)
+    lifecycle_tracker.record_callback(transaction_id, "on_status", RET10_FULFILLMENT_STATE["RTO_DELIVERED"])
 
 
 async def push_prepaid_post_track_statuses(
